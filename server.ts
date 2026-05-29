@@ -540,13 +540,35 @@ app.post("/api/auth/register", (req, res) => {
 
 app.post("/api/auth/login", (req, res) => {
   const { email, password } = req.body;
-  const borrower = borrowersStore.find(b => b.email === email);
+  
+  // Try finding in adminUsersStore
+  const admin = adminUsersStore.find(a => a.email && a.email.toLowerCase() === (email || "").toLowerCase());
+  if (admin) {
+    if (password === "admin123") {
+      return res.json({
+        status: "Success",
+        token: `jwt_session_token_encrypted_098234_${admin.id}`,
+        role: "Operator",
+        borrower: {
+          id: admin.id,
+          name: admin.name,
+          email: admin.email,
+          role: "Operator"
+        }
+      });
+    } else {
+      return res.status(401).json({ error: "Invalid password for administrator." });
+    }
+  }
+
+  const borrower = borrowersStore.find(b => b.email && b.email.toLowerCase() === (email || "").toLowerCase());
   if (!borrower) {
     return res.status(401).json({ error: "No matching borrower credentials found." });
   }
   res.json({
     status: "Success",
     token: `jwt_session_token_encrypted_098234_${borrower.id}`,
+    role: "Borrower",
     borrower
   });
 });

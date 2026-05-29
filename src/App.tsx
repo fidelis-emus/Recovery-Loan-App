@@ -108,20 +108,14 @@ export default function App() {
     lastLoginIp?: string;
     clientApp?: string;
     token?: string;
-  }>(() => {
+  } | null>(() => {
     const saved = localStorage.getItem('currentUser');
     if (saved) {
       try {
         return JSON.parse(saved);
       } catch (e) {}
     }
-    return {
-      email: 'fidelisemus@gmail.com',
-      name: 'Fidelis Emus',
-      role: 'Operator',
-      lastLoginIp: '197.210.8.23',
-      clientApp: 'CredGuard Desktop Console'
-    };
+    return null;
   });
 
   const [simulatedLoginEmail, setSimulatedLoginEmail] = useState('');
@@ -171,8 +165,8 @@ export default function App() {
   const fetchWithDbHeaders = async (url: string, options: RequestInit = {}) => {
     const headers = {
       ...(options.headers || {}),
-      'x-user-email': currentUser.email || '',
-      'x-user-role': currentUser.role || ''
+      'x-user-email': currentUser?.email || '',
+      'x-user-role': currentUser?.role || ''
     };
     return fetch(url, { ...options, headers });
   };
@@ -476,7 +470,11 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
-    localStorage.setItem('currentUser', JSON.stringify(currentUser));
+    if (currentUser) {
+      localStorage.setItem('currentUser', JSON.stringify(currentUser));
+    } else {
+      localStorage.removeItem('currentUser');
+    }
   }, [currentUser]);
 
   // New Entity Creation forms
@@ -623,16 +621,26 @@ export default function App() {
       if (!res.ok) {
         setAuthError(data.error || 'Authentication failed.');
       } else {
-        setCurrentUser({
-          email: data.borrower.email,
-          name: data.borrower.name,
-          role: 'Borrower',
-          id: data.borrower.id,
-          lastLoginIp: '102.89.34.89',
-          clientApp: 'Mobile Android Applet / Client API SDK',
+        const isOperator = data.role === 'Operator';
+        const loggedUser: {
+          email: string;
+          name: string;
+          role: 'Operator' | 'Borrower';
+          id?: string;
+          lastLoginIp?: string;
+          clientApp?: string;
+          token?: string;
+        } = {
+          email: data.borrower?.email || simulatedLoginEmail,
+          name: data.borrower?.name || (isOperator ? 'System Administrator' : 'Borrower'),
+          role: isOperator ? 'Operator' : 'Borrower',
+          id: data.borrower?.id,
+          lastLoginIp: isOperator ? '197.210.8.23' : '102.89.34.89',
+          clientApp: isOperator ? 'CredGuard Desktop Console' : 'Mobile Android Applet / Client API SDK',
           token: data.token
-        });
-        setAuthSuccess(`Securely authenticated as ${data.borrower.name}!`);
+        };
+        setCurrentUser(loggedUser);
+        setAuthSuccess(`Securely authenticated as ${loggedUser.name}!`);
         setTimeout(() => {
           setShowAuthDialog(false);
           setSimulatedLoginEmail('');
@@ -687,13 +695,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
-    setCurrentUser({
-      email: 'fidelisemus@gmail.com',
-      name: 'Fidelis Emus',
-      role: 'Operator',
-      lastLoginIp: '197.210.8.23',
-      clientApp: 'CredGuard Desktop Console'
-    });
+    setCurrentUser(null);
     setShowProfileMenu(false);
   };
 
@@ -869,6 +871,203 @@ export default function App() {
   const recoveryPerformancePercent = totalOverdueCasesCount > 0
     ? Math.round((resolvedCasesCount / totalOverdueCasesCount) * 100)
     : 0;
+
+  if (!currentUser) {
+    return (
+      <div className={`min-h-screen ${theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans antialiased flex items-center justify-center p-4 transition-colors duration-200 relative`}>
+        {/* Real-time Theme Toggle Switcher */}
+        <div className="absolute top-4 right-4 z-50">
+          <button
+            onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+            title={theme === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+            className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-800 transition-colors cursor-pointer"
+          >
+            {theme === 'light' ? <Moon className="h-4.5 w-4.5" /> : <Sun className="h-4.5 w-4.5" />}
+          </button>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-8 space-y-6 text-slate-800 dark:text-slate-100">
+          <div className="text-center space-y-2">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-soft">
+              <Cpu className="h-6 w-6" />
+            </div>
+            <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">CredGuard Core</h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Recovery &amp; Loan Intelligence System Gateway
+            </p>
+          </div>
+
+          {authError && (
+            <div className="p-3 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/40 text-rose-700 dark:text-rose-400 rounded-lg text-xs font-semibold">
+              ⚠️ {authError}
+            </div>
+          )}
+
+          {authSuccess && (
+            <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/40 text-emerald-700 dark:text-emerald-400 rounded-lg text-xs font-semibold animate-pulse">
+              ✨ {authSuccess}
+            </div>
+          )}
+
+          {authDialogMode === 'login' ? (
+            <form onSubmit={handleSimulatedLogin} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">Email Address</label>
+                <input
+                  type="email"
+                  required
+                  placeholder="e.g. fidelisemus@gmail.com"
+                  className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-transparent text-xs font-medium focus:ring-2 focus:ring-indigo-600 text-slate-900 dark:text-white"
+                  value={simulatedLoginEmail}
+                  onChange={e => setSimulatedLoginEmail(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">Password</label>
+                <input
+                  type="password"
+                  required
+                  placeholder="••••••••"
+                  className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-transparent text-xs font-medium focus:ring-2 focus:ring-indigo-600 text-slate-900 dark:text-white"
+                  value={simulatedLoginPassword}
+                  onChange={e => setSimulatedLoginPassword(e.target.value)}
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-lg text-xs transition-colors cursor-pointer shadow-md shadow-indigo-600/10"
+              >
+                Secure Portal Access
+              </button>
+
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthDialogMode('register');
+                    setAuthError('');
+                  }}
+                  className="w-full text-center text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-semibold cursor-pointer"
+                >
+                  Create a new Borrower account
+                </button>
+              </div>
+
+              <div className="bg-slate-50 dark:bg-slate-950/50 p-3.5 rounded-lg border border-slate-100 dark:border-slate-800/80 space-y-2">
+                <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Gateway Credentials Reference</p>
+                <div className="text-[11px] text-slate-600 dark:text-slate-300 space-y-1.5 leading-relaxed">
+                  <div className="flex justify-between items-center bg-white dark:bg-slate-900 p-2 rounded border border-slate-200/50 dark:border-slate-800">
+                    <div>
+                      <span className="block font-semibold">Administrator Privileges</span>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 block">Email: <code className="font-mono bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">fidelisemus@gmail.com</code></span>
+                      <span className="block text-[10px] text-slate-500 dark:text-slate-400">Password: <code className="font-mono bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">admin123</code></span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSimulatedLoginEmail('fidelisemus@gmail.com');
+                        setSimulatedLoginPassword('admin123');
+                        setAuthError('');
+                      }}
+                      className="bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 px-2 py-1 rounded text-[10px] font-extrabold hover:bg-indigo-100 dark:hover:bg-indigo-900 transition-colors"
+                    >
+                      Fill Admin
+                    </button>
+                  </div>
+                  <div className="p-2 text-slate-500 dark:text-slate-400 text-[10px] leading-normal">
+                    <span>💡 For Borrower access, you can enter any borrower's email (no password check required) or click register above.</span>
+                  </div>
+                </div>
+              </div>
+            </form>
+          ) : (
+            <form onSubmit={handleSimulatedRegister} className="space-y-3.5">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">Full Name</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="John Doe"
+                    className="w-full p-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-transparent text-xs font-semibold focus:ring-1 focus:ring-indigo-600 text-slate-900 dark:text-white"
+                    value={simulatedRegisterForm.name}
+                    onChange={e => setSimulatedRegisterForm({ ...simulatedRegisterForm, name: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">Email Address</label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="john@example.com"
+                    className="w-full p-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-transparent text-xs font-semibold focus:ring-1 focus:ring-indigo-600 text-slate-900 dark:text-white"
+                    value={simulatedRegisterForm.email}
+                    onChange={e => setSimulatedRegisterForm({ ...simulatedRegisterForm, email: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">Phone</label>
+                  <input
+                    type="text"
+                    placeholder="+234..."
+                    className="w-full p-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-transparent text-xs font-semibold focus:ring-1 focus:ring-indigo-600 text-slate-900 dark:text-white"
+                    value={simulatedRegisterForm.phone}
+                    onChange={e => setSimulatedRegisterForm({ ...simulatedRegisterForm, phone: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">Role/Employment</label>
+                  <input
+                    type="text"
+                    placeholder="Self-Employed"
+                    className="w-full p-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-transparent text-xs font-semibold focus:ring-1 focus:ring-indigo-600 text-slate-900 dark:text-white"
+                    value={simulatedRegisterForm.company}
+                    onChange={e => setSimulatedRegisterForm({ ...simulatedRegisterForm, company: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">Access Password</label>
+                <input
+                  type="password"
+                  required
+                  placeholder="••••••••"
+                  className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-transparent text-xs font-medium focus:ring-2 focus:ring-indigo-600 text-slate-900 dark:text-white"
+                  value={simulatedRegisterForm.password}
+                  onChange={e => setSimulatedRegisterForm({ ...simulatedRegisterForm, password: e.target.value })}
+                />
+              </div>
+
+              <div className="flex items-center justify-between text-xs pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthDialogMode('login');
+                    setAuthError('');
+                  }}
+                  className="text-indigo-600 dark:text-indigo-400 hover:underline font-semibold cursor-pointer"
+                >
+                  Already registered? Log In
+                </button>
+                <button
+                  type="submit"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg text-xs transition-colors cursor-pointer"
+                >
+                  Register Profile
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`min-h-screen ${theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans antialiased selection:bg-indigo-100 selection:text-indigo-900 transition-colors duration-200`}>
