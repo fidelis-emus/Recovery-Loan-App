@@ -469,6 +469,31 @@ const notificationsLogsStore: NotificationLog[] = [
   }
 ];
 
+// Additional Database Stores matching the schema in user screenshot
+const adminUsersStore = [
+  { id: "adm_01", name: "Aisha Yusuf", email: "aisha.y@core-ops.com", role: "Senior Case Officer", joinedAt: "2024-01-01T08:00:00Z" },
+  { id: "adm_02", name: "Chinedu Okafor", email: "chinedu.o@core-ops.com", role: "Field Recovery Lead", joinedAt: "2024-03-12T10:30:00Z" },
+  { id: "adm_03", name: "System Administrator", email: "fidelisemus@gmail.com", role: "Super Admin", joinedAt: "2025-05-25T12:00:00Z" }
+];
+
+const recoveryActionsStore = [
+  { id: "act_01", caseId: "case_501", actionType: "Call Outcome", timestamp: "2026-05-10T11:00:00Z", agent: "Aisha Yusuf", status: "Logged", note: "Spoke with borrower's father. Promised partial settlement within 3 days." },
+  { id: "act_02", caseId: "case_501", actionType: "Pledge Confirmation", timestamp: "2026-05-16T09:00:00Z", agent: "System Core", status: "Failed", note: "Automatic tracking of Paystack transaction timed out. Repayment failed." },
+  { id: "act_03", caseId: "case_502", actionType: "Dunning Level 2 Notice", timestamp: "2026-04-20T14:30:00Z", agent: "System Core", status: "Executed", note: "Legal dunning notice dispatched to office coordinates in Lagos." }
+];
+
+const auditLogsStore = [
+  { id: "aud_01", action: "KYC_VERIFICATION", detail: "User Adebayo Chukwuma KYC marked Verified by Aisha Yusuf", timestamp: "2026-05-28T09:30:00Z", actor: "Aisha Yusuf" },
+  { id: "aud_02", action: "LOAN_DISBURSEMENT", detail: "Loan loan_101 of N500k disbursed to borrower Adebayo Chukwuma.", timestamp: "2026-02-01T10:00:00Z", actor: "Financial Desk" },
+  { id: "aud_03", action: "LOGIN_SUCCESS", detail: "Sarah Jenkins authenticated successfully from UK.", timestamp: "2026-05-29T07:15:00Z", actor: "System Session Core" }
+];
+
+const consentRecordsStore = [
+  { id: "con_01", borrowerName: "Adebayo Chukwuma", consentType: "GEO_LOCATION", granted: true, timestamp: "2026-05-28T14:45:00Z", ip: "102.89.34.89" },
+  { id: "con_02", borrowerName: "Sarah Jenkins", consentType: "BIOMETRIC_CHECK", granted: true, timestamp: "2026-05-29T07:15:00Z", ip: "82.165.23.4" },
+  { id: "con_03", borrowerName: "Olawale Sanusi", consentType: "TELEMETRY_RECORDING", granted: true, timestamp: "2026-05-27T10:05:00Z", ip: "197.210.8.23" }
+];
+
 // Helper functions for dynamic auto-calculations
 function recalculateLoanRepaymentStatus(loanId: string) {
   const loan = loansStore.find(l => l.id === loanId);
@@ -1034,6 +1059,441 @@ app.post("/api/notifications/trigger", (req, res) => {
     message: `Message broadcast triggered successfully to channel ${target}`,
     log
   });
+});
+
+// -------------------------------------------------------------
+// DYNAMIC DB TABLES & SCHEMAS MANAGEMENT ACTIONS
+// -------------------------------------------------------------
+
+// Active schemas registry for added fields
+const customAddedColumns: Record<string, string[]> = {};
+
+// Helper to look up active tables
+function getLiveTablesMap() {
+  return {
+    admin_users: adminUsersStore,
+    borrowers: borrowersStore,
+    loans: loansStore,
+    payments: paymentsStore,
+    sessions: sessionsStore,
+    geolocation_logs: geoHistoryStore,
+    risk_alerts: riskAlertsStore,
+    recovery_cases: recoveryCasesStore,
+    recovery_actions: recoveryActionsStore,
+    notifications: notificationsLogsStore,
+    audit_logs: auditLogsStore,
+    consent_records: consentRecordsStore
+  };
+}
+
+// 1. Get List of all 12 DB tables and Row Counts
+app.get("/api/db/tables", (req, res) => {
+  const liveMap = getLiveTablesMap();
+  const tablesMetadata = [
+    { id: "admin_users", name: "admin_users", count: liveMap.admin_users.length, description: "System administrators, roles, and credential references.", schema: ["id", "name", "email", "role", "joinedAt"] },
+    { id: "borrowers", name: "borrowers", count: liveMap.borrowers.length, description: "Customer/Borrower profiles and core identity verification records.", schema: ["id", "name", "email", "phone", "company", "kycStatus", "createdAt"] },
+    { id: "loans", name: "loans", count: liveMap.loans.length, description: "Loan portfolio tracking details, margins, rates, and outcomes.", schema: ["id", "borrowerId", "borrowerName", "amount", "interestRate", "dueDate", "amountPaid", "status"] },
+    { id: "payments", name: "payments", count: liveMap.payments.length, description: "Repayments and collection clears logged via platform payment thresholds.", schema: ["id", "loanId", "borrowerId", "borrowerName", "amount", "paymentDate", "gateway", "status"] },
+    { id: "sessions", name: "sessions", count: liveMap.sessions.length, description: "Authenticated borrower login profiles, IP footprints, and telemetry checks.", schema: ["id", "borrowerId", "borrowerName", "ipAddress", "deviceType", "os", "browser", "timestamp"] },
+    { id: "geolocation_logs", name: "geolocation_logs", count: liveMap.geolocation_logs.length, description: "Auditable geographic coordinates, ISP registries, and Speed-Limit anomalies.", schema: ["ipAddress", "timestamp", "country", "region", "city", "isp", "timezone", "latitude", "longitude"] },
+    { id: "risk_alerts", name: "risk_alerts", count: liveMap.risk_alerts.length, description: "Proactive fraud alerts, VPN overrides, and negative behavioral delay indexes.", schema: ["id", "borrowerId", "borrowerName", "type", "severity", "details", "createdAt", "resolved"] },
+    { id: "recovery_cases", name: "recovery_cases", count: liveMap.recovery_cases.length, description: "Overdue loan collections, assigned agents, and dunning cycles.", schema: ["id", "loanId", "borrowerId", "borrowerName", "overdueAmount", "daysOverdue", "assignedAgent", "stage"] },
+    { id: "recovery_actions", name: "recovery_actions", count: liveMap.recovery_actions.length, description: "Direct notes, promise to pay actions, and legal escalations tracker.", schema: ["id", "caseId", "actionType", "timestamp", "agent", "status", "note"] },
+    { id: "notifications", name: "notifications", count: liveMap.notifications.length, description: "Automated pre-due SMS alerts, WhatsApp bulletins, and credit warnings dispatched.", schema: ["id", "borrowerId", "borrowerName", "type", "channel", "trigger", "status", "message"] },
+    { id: "audit_logs", name: "audit_logs", count: liveMap.audit_logs.length, description: "System operational audit trails capturing critical administrative executions securely.", schema: ["id", "action", "detail", "timestamp", "actor"] },
+    { id: "consent_records", name: "consent_records", count: liveMap.consent_records.length, description: "Explicit consumer privacy consent registries (GDPR & NDPR mandated check).", schema: ["id", "borrowerName", "consentType", "granted", "timestamp", "ip"] }
+  ];
+
+  // Append any custom added columns
+  const enriched = tablesMetadata.map(tab => {
+    const extra = customAddedColumns[tab.id] || [];
+    return {
+      ...tab,
+      schema: [...tab.schema, ...extra]
+    };
+  });
+
+  res.json(enriched);
+});
+
+// 2. Clear / Populate database tables
+app.post("/api/db/actions/reset", (req, res) => {
+  // Simple administrative system action to clear rows or seed tables
+  const { tableName } = req.body;
+  const liveMap = getLiveTablesMap();
+  const targetArray = (liveMap as any)[tableName];
+  if (targetArray) {
+    targetArray.length = 0; // Clear the array in-place
+    // Log the audit
+    auditLogsStore.push({
+      id: `aud_${Date.now()}`,
+      action: "TABLE_TRUNCATING",
+      detail: `All records cleared from table '${tableName}' by administrator.`,
+      timestamp: new Date().toISOString(),
+      actor: "Super Admin"
+    });
+    return res.json({ success: true, message: `All rows cleared successfully from ${tableName}.` });
+  }
+  res.status(404).json({ error: "Table not found." });
+});
+
+// 3. Get all records for a specific table
+app.get("/api/db/:tableName", (req, res) => {
+  const { tableName } = req.params;
+  const liveMap = getLiveTablesMap();
+  const targetArray = (liveMap as any)[tableName.toLowerCase()];
+  
+  if (!targetArray) {
+    return res.status(404).json({ error: "Table not found in catalog systems." });
+  }
+  res.json(targetArray);
+});
+
+// 4. Add a record/row to a specific table
+app.post("/api/db/:tableName", (req, res) => {
+  const { tableName } = req.params;
+  const liveMap = getLiveTablesMap();
+  const targetArray = (liveMap as any)[tableName.toLowerCase()];
+  
+  if (!targetArray) {
+    return res.status(404).json({ error: "Table not found in catalog systems." });
+  }
+
+  const newRow = { ...req.body };
+  // Enforce unique id if missing
+  if (!newRow.id && !newRow.ipAddress) {
+    newRow.id = `${tableName.substring(0, 3)}_${Math.floor(Math.random() * 1000 + 100)}`;
+  }
+  if (!newRow.timestamp && !newRow.createdAt && !newRow.joinedAt) {
+    const defaultTime = new Date().toISOString();
+    if (tableName === "admin_users") newRow.joinedAt = defaultTime;
+    else if (tableName === "audit_logs" || tableName === "consent_records" || tableName === "notifications" || tableName === "recovery_actions" || tableName === "sessions" || tableName === "geolocation_logs") {
+      newRow.timestamp = defaultTime;
+    } else {
+      newRow.createdAt = defaultTime;
+    }
+  }
+
+  targetArray.push(newRow);
+
+  // System audit tracking
+  auditLogsStore.push({
+    id: `aud_${Date.now()}`,
+    action: "RECORD_INSERTION",
+    detail: `Inserted new row in table '${tableName}' with ID '${newRow.id || newRow.ipAddress}'.`,
+    timestamp: new Date().toISOString(),
+    actor: "Admin UI Database Manager"
+  });
+
+  res.status(201).json({ success: true, row: newRow });
+});
+
+// 5. Update a record in a specific table
+app.put("/api/db/:tableName/:id", (req, res) => {
+  const { tableName, id } = req.params;
+  const liveMap = getLiveTablesMap();
+  const targetArray = (liveMap as any)[tableName.toLowerCase()];
+  
+  if (!targetArray) {
+    return res.status(404).json({ error: "Table not found in database catalog." });
+  }
+
+  const index = targetArray.findIndex((item: any) => String(item.id || item.ipAddress) === String(id));
+  if (index === -1) {
+    return res.status(404).json({ error: "No matching record with specified key identified." });
+  }
+
+  const updatedRecord = { ...targetArray[index], ...req.body };
+  targetArray[index] = updatedRecord;
+
+  // System audit tracking
+  auditLogsStore.push({
+    id: `aud_${Date.now()}`,
+    action: "RECORD_MUTATION",
+    detail: `Modified record ID '${id}' in table '${tableName}'.`,
+    timestamp: new Date().toISOString(),
+    actor: "Admin UI Database Manager"
+  });
+
+  res.json({ success: true, row: updatedRecord });
+});
+
+// 6. Delete a record from a specific table
+app.delete("/api/db/:tableName/:id", (req, res) => {
+  const { tableName, id } = req.params;
+  const liveMap = getLiveTablesMap();
+  const targetArray = (liveMap as any)[tableName.toLowerCase()];
+  
+  if (!targetArray) {
+    return res.status(404).json({ error: "Table not found." });
+  }
+
+  const index = targetArray.findIndex((item: any) => String(item.id || item.ipAddress) === String(id));
+  if (index === -1) {
+    return res.status(404).json({ error: "No matching record found to prune." });
+  }
+
+  const deletedItem = targetArray.splice(index, 1)[0];
+
+  // System audit tracking
+  auditLogsStore.push({
+    id: `aud_${Date.now()}`,
+    action: "RECORD_DELETION",
+    detail: `Pruned record ID '${id}' from table '${tableName}'.`,
+    timestamp: new Date().toISOString(),
+    actor: "Admin UI Database Manager"
+  });
+
+  res.json({ success: true, deleted: deletedItem });
+});
+
+// 7. Dynamic Column / Attribute Injection API
+app.post("/api/db/:tableName/columns", (req, res) => {
+  const { tableName } = req.params;
+  const { columnName } = req.body;
+  
+  if (!columnName || !/^[a-zA-Z0-9_]+$/.test(columnName)) {
+    return res.status(400).json({ error: "Valid column name matching [a-zA-Z0-9_] is required." });
+  }
+
+  const nameKey = tableName.toLowerCase();
+  if (!customAddedColumns[nameKey]) {
+    customAddedColumns[nameKey] = [];
+  }
+
+  if (!customAddedColumns[nameKey].includes(columnName)) {
+    customAddedColumns[nameKey].push(columnName);
+  }
+
+  // Inject defaults to existing store records for schema safety
+  const liveMap = getLiveTablesMap();
+  const targetArray = (liveMap as any)[nameKey];
+  if (targetArray) {
+    targetArray.forEach((item: any) => {
+      if (item[columnName] === undefined) {
+        item[columnName] = "";
+      }
+    });
+  }
+
+  res.json({ success: true, message: `Column '${columnName}' successfully added to ${tableName} schema.` });
+});
+
+// 8. Simulated SQL Terminal Compiler Executive
+app.post("/api/db/query", (req, res) => {
+  const { query } = req.body;
+  if (!query) {
+    return res.status(400).json({ error: "No SQL query provided." });
+  }
+
+  const normalizedQuery = query.trim().replace(/\s+/g, ' ');
+  const selectRegex = /^SELECT\s+(\*|[a-zA-Z0-9_,\s]+)\s+FROM\s+([a-zA-Z0-9_]+)(?:\s+WHERE\s+(.+))?/i;
+  const match = selectRegex.exec(normalizedQuery);
+  
+  if (!match) {
+    return res.json({
+      success: false,
+      error: "SQL Query syntax not supported in simulation. Try standard SELECT * FROM [tableName] WHERE [field] = [value]"
+    });
+  }
+  
+  const fieldsStr = match[1].trim();
+  const rawTableName = match[2].trim().toLowerCase();
+  const whereClause = match[3] ? match[3].trim() : null;
+  
+  const liveMap = getLiveTablesMap();
+  const activeTables: Record<string, any[]> = liveMap as any;
+  
+  if (!activeTables[rawTableName]) {
+    return res.status(404).json({
+      success: false,
+      error: `Table '${rawTableName}' does not exist in the database catalog.`
+    });
+  }
+  
+  let rows = [...activeTables[rawTableName]];
+  
+  if (whereClause) {
+    try {
+      const conditionRegex = /([a-zA-Z0-9_]+)\s*(=|>|<|>=|<=|LIKE)\s*(.+)/i;
+      const condMatch = conditionRegex.exec(whereClause);
+      if (condMatch) {
+        const field = condMatch[1].trim();
+        const op = condMatch[2].trim().toUpperCase();
+        let valStr = condMatch[3].trim();
+        
+        if ((valStr.startsWith("'") && valStr.endsWith("'")) || (valStr.startsWith('"') && valStr.endsWith('"'))) {
+          valStr = valStr.substring(1, valStr.length - 1);
+        }
+        
+        rows = rows.filter(row => {
+          const rowVal = row[field];
+          if (rowVal === undefined) return false;
+          
+          if (op === "=") {
+            return String(rowVal).toLowerCase() === valStr.toLowerCase();
+          } else if (op === "LIKE") {
+            return String(rowVal).toLowerCase().includes(valStr.toLowerCase());
+          } else {
+            const numRowVal = Number(rowVal);
+            const numVal = Number(valStr);
+            if (isNaN(numRowVal) || isNaN(numVal)) {
+              return false;
+            }
+            if (op === ">") return numRowVal > numVal;
+            if (op === "<") return numRowVal < numVal;
+            if (op === ">=") return numRowVal >= numVal;
+            if (op === "<=") return numRowVal <= numVal;
+          }
+          return false;
+        });
+      }
+    } catch (e) {
+      console.error("Failed to compile SQLite parser WHERE filter:", e);
+    }
+  }
+  
+  if (fieldsStr !== "*") {
+    const fields = fieldsStr.split(',').map(f => f.trim());
+    rows = rows.map(row => {
+      const projected: Record<string, any> = {};
+      fields.forEach(f => {
+        projected[f] = row[f];
+      });
+      return projected;
+    });
+  }
+  
+  res.json({
+    success: true,
+    query: query,
+    rowCount: rows.length,
+    rows: rows
+  });
+});
+
+// 9. AI-driven record synthesis utilizing Gemini API
+app.post("/api/db/ai-synthesize", async (req, res) => {
+  const { tableName, prompt } = req.body;
+  if (!tableName) {
+    return res.status(400).json({ error: "Table name is required." });
+  }
+
+  const liveMap = getLiveTablesMap();
+  const activeTables: Record<string, any[]> = liveMap as any;
+
+  if (!activeTables[tableName.toLowerCase()]) {
+    return res.status(404).json({ error: `Table '${tableName}' does not exist.` });
+  }
+
+  const schemaInfo: Record<string, string> = {
+    admin_users: "JSON array of AdminUser objects containing: id (e.g., adm_401), name (string), email (string), role (string e.g., Regional Manager), joinedAt (ISO string)",
+    borrowers: "JSON array of Borrower objects containing: id (e.g., bor_401), name (string), email (string), phone (string), company (string), kycStatus ('Pending' or 'Verified' or 'Rejected'), createdAt (ISO string)",
+    loans: "JSON array of Loan objects containing: id (e.g., loan_401), borrowerId (string), borrowerName (string), amount (number), interestRate (number), startDate (ISO string), dueDate (ISO string), amountPaid (number), latePenalties (number), status ('Active' or 'Paid' or 'Overdue')",
+    payments: "JSON array of Payment objects containing: id (e.g., pmt_401), loanId (string), borrowerId (string), borrowerName (string), amount (number), paymentDate (ISO string), gateway ('Stripe' or 'Paystack'), status ('Successful')",
+    sessions: "JSON array of UserSession objects containing: id (e.g., sess_401), borrowerId (string), borrowerName (string), ipAddress (string), deviceType ('web_desktop' or 'mobile_android'), os (string), browser (string), timestamp (ISO string), consentGiven (boolean), vpnUsed (boolean), proxyUsed (boolean)",
+    geolocation_logs: "JSON array of GeoLocation objects containing: ipAddress (string), timestamp (ISO string), country (string), region (string), city (string), isp (string), timezone (string), latitude (number), longitude (number)",
+    risk_alerts: "JSON array of RiskAlert objects containing: id (e.g., alt_401), borrowerId (string), borrowerName (string), type ('VPN_DETECTED' or 'LOCATION_SHIELD_ALERT'), severity ('High' or 'Critical'), details (string), createdAt (ISO string), resolved (boolean)",
+    recovery_cases: "JSON array of RecoveryCase objects containing: id (e.g., case_401), loanId (string), borrowerId (string), borrowerName (string), overdueAmount (number), daysOverdue (number), assignedAgent (string), stage ('Dunning' or 'Legal_Escalation'), promiseToPayHistory (empty array), logs (empty array)",
+    recovery_actions: "JSON array of RecoveryAction objects containing: id (e.g., act_401), caseId (string), actionType (string), timestamp (ISO string), agent (string), status (string), note (string)",
+    notifications: "JSON array of NotificationLog objects containing: id (e.g., ntf_401), borrowerId (string), borrowerName (string), type ('SMS' or 'Email'), channel (string), trigger ('On_Due' or 'After_Overdue'), status ('Delivered'), message (string), timestamp (ISO string)",
+    audit_logs: "JSON array of AuditLog objects containing: id (e.g., aud_401), action (string e.g., LOGIN_EVENT), detail (string), timestamp (ISO string), actor (string)",
+    consent_records: "JSON array of ConsentRecord objects containing: id (e.g., con_401), borrowerName (string), consentType (string), granted (boolean), timestamp (ISO) , ip (string)"
+  };
+
+  const currentSchemaText = schemaInfo[tableName.toLowerCase()] || "JSON array of objects with realistic keys";
+
+  if (!ai) {
+    // Graceful fallback with static realistic record
+    const mockId = `${tableName.substring(0, 3)}_${Math.floor(Math.random() * 900 + 100)}`;
+    const mockRow: any = { id: mockId };
+    
+    // Add realistic mock fields
+    if (tableName === "admin_users") {
+      mockRow.name = "Olumide Johnson";
+      mockRow.email = "olumide.j@core-ops.com";
+      mockRow.role = "Regional Risk Inspector";
+      mockRow.joinedAt = new Date().toISOString();
+    } else if (tableName === "audit_logs") {
+      mockRow.action = "AI_TRIGGER_SIMULATOR";
+      mockRow.detail = "Simulated synthetic insert executed locally due to offline fallback mode.";
+      mockRow.timestamp = new Date().toISOString();
+      mockRow.actor = "AI Agent";
+    } else {
+      mockRow.borrowerName = "Dynamic Sample Borrower";
+      mockRow.note = "Static custom entry created in offline state.";
+      mockRow.timestamp = new Date().toISOString();
+    }
+
+    activeTables[tableName.toLowerCase()].push(mockRow);
+    return res.json({
+      success: true,
+      insertedCount: 1,
+      rows: [mockRow],
+      note: "Gemini client offline. Standard baseline mock injected automatically."
+    });
+  }
+
+  try {
+    const promptText = `
+      You are an automated backend database synthesis agent.
+      Return exactly 3 synthetically fabricated valid rows for table '${tableName}' conforming strictly to this format:
+      ${currentSchemaText}
+      
+      User requested context: "${prompt || 'realistic production records'}"
+      
+      CRITICAL: You must return ONLY raw valid JSON text, with absolutely no preamble, no wrapping, and no markdown \`\`\`json blocks.
+    `;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: promptText
+    });
+
+    let rawText = response.text ? response.text.trim() : "";
+    if (rawText.startsWith("```")) {
+      rawText = rawText.replace(/^```[a-z]*\s*/i, "").replace(/\s*```$/, "");
+    }
+
+    const parsedArray = JSON.parse(rawText);
+    if (Array.isArray(parsedArray)) {
+      parsedArray.forEach((row: any) => {
+        if (!row.id && !row.ipAddress) {
+          row.id = `${tableName.substring(0, 3)}_${Math.floor(Math.random() * 900 + 100)}`;
+        }
+        activeTables[tableName.toLowerCase()].push(row);
+      });
+
+      // Insert audit log
+      auditLogsStore.push({
+        id: `aud_${Date.now()}`,
+        action: "AI_RECORD_SYNTHESIS",
+        detail: `Synthesized & appended ${parsedArray.length} items to table '${tableName}' via system-cognitive generative procedures.`,
+        timestamp: new Date().toISOString(),
+        actor: "Gemini Generative Engine"
+      });
+
+      res.json({
+        success: true,
+        insertedCount: parsedArray.length,
+        rows: parsedArray
+      });
+    } else {
+      throw new Error("Generative engine return format is not a raw array list.");
+    }
+  } catch (error) {
+    console.error("Failed AI synthesis:", error);
+    // Fallback static insert
+    const mockId = `${tableName.substring(0,3)}_${Math.floor(Math.random() * 100 + 500)}`;
+    const fallbackItem = { id: mockId, name: "Fallback Profile Item", timestamp: new Date().toISOString() };
+    activeTables[tableName.toLowerCase()].push(fallbackItem);
+    res.json({
+      success: true,
+      insertedCount: 1,
+      rows: [fallbackItem],
+      note: "Recovered via standard local mock mapping fallback."
+    });
+  }
 });
 
 // EXPORT ENDPOINTS

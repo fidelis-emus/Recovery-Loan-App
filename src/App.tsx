@@ -40,7 +40,12 @@ import {
   User,
   Lock,
   LogIn,
-  LogOut
+  LogOut,
+  Database,
+  Trash2,
+  Edit3,
+  Terminal,
+  Table
 } from 'lucide-react';
 import { Borrower, Loan, Payment, UserSession, RiskAlert, RecoveryCase, NotificationLog, GeoLocation } from './types';
 import { SDK_TEMPLATES } from './utils/sdkTemplates';
@@ -48,7 +53,7 @@ import { TravelMap } from './components/TravelMap';
 
 export default function App() {
   // Navigation Tabs
-  const [activeTab, setActiveTab] = useState<'analytics' | 'borrowers' | 'loans' | 'recovery' | 'audits' | 'sdks'>('analytics');
+  const [activeTab, setActiveTab ] = useState<'analytics' | 'borrowers' | 'loans' | 'recovery' | 'audits' | 'sdks' | 'database'>('analytics');
 
   // Backend state stores
   const [borrowers, setBorrowers] = useState<Borrower[]>([]);
@@ -75,6 +80,20 @@ export default function App() {
   const [sessionSearch, setSessionSearch] = useState<string>('');
   const [sessionStartDate, setSessionStartDate] = useState<string>('');
   const [sessionEndDate, setSessionEndDate] = useState<string>('');
+
+  // Advanced Recovery Case Management Filter & Interactive State
+  const [recoverySearch, setRecoverySearch] = useState<string>('');
+  const [recoveryStageFilter, setRecoveryStageFilter] = useState<string>('All');
+  const [recoveryAgentFilter, setRecoveryAgentFilter] = useState<string>('All');
+  const [recoverySortBy, setRecoverySortBy] = useState<string>('Days_Overdue_Desc');
+  const [expandedCaseId, setExpandedCaseId] = useState<string | null>(null);
+
+  // States for inline action overrides per single case
+  const [activeCardAction, setActiveCardAction] = useState<Record<string, 'LOG_NOTE' | 'PROMISE_TO_PAY' | 'ESCALATE' | 'ASSIGN_AGENT' | null>>({});
+  const [cardPtpAmount, setCardPtpAmount] = useState<Record<string, string>>({});
+  const [cardPtpDate, setCardPtpDate] = useState<Record<string, string>>({});
+  const [cardLogContent, setCardLogContent] = useState<Record<string, string>>({});
+  const [cardSelectedAgent, setCardSelectedAgent] = useState<Record<string, string>>({});
 
   // Theme & Simulated Authentication state
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -118,6 +137,200 @@ export default function App() {
   const [authDialogMode, setAuthDialogMode] = useState<'login' | 'register'>('login');
   const [authError, setAuthError] = useState('');
   const [authSuccess, setAuthSuccess] = useState('');
+
+  // Integrated SQL Engine & Database Workstation States
+  const [dbTables, setDbTables] = useState<any[]>([]);
+  const [selectedDbTable, setSelectedDbTable] = useState<any | null>(null);
+  const [tableRows, setTableRows] = useState<any[]>([]);
+  const [searchRowQuery, setSearchRowQuery] = useState('');
+  const [sqlQuery, setSqlQuery] = useState('SELECT * FROM borrowers WHERE kycStatus = \'Verified\'');
+  const [sqlResult, setSqlResult] = useState<any | null>(null);
+  const [sqlError, setSqlError] = useState('');
+  const [aiSynthesisPrompt, setAiSynthesisPrompt] = useState('Realistic active transactions');
+  const [synthesizing, setSynthesizing] = useState(false);
+  const [newRecordModalOpen, setNewRecordModalOpen] = useState(false);
+  const [newRecordData, setNewRecordData] = useState<Record<string, string>>({});
+  const [newColumnName, setNewColumnName] = useState('');
+  const [editingRowId, setEditingRowId] = useState<string | null>(null);
+  const [editingRowData, setEditingRowData] = useState<any>({});
+  const [tablesLoading, setTablesLoading] = useState(false);
+  const [aiAnalysisResult, setAiAnalysisResult] = useState('');
+
+  // Functions to query backend operations
+  const fetchDbTables = async () => {
+    setTablesLoading(true);
+    try {
+      const res = await fetch('/api/db/tables');
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setDbTables(data);
+      }
+    } catch (e) {
+      console.error("Failed loading database information matrix", e);
+    } finally {
+      setTablesLoading(false);
+    }
+  };
+
+  const exploreTable = async (tableMeta: any) => {
+    setSelectedDbTable(tableMeta);
+    setSearchRowQuery('');
+    setEditingRowId(null);
+    try {
+      const res = await fetch(`/api/db/${tableMeta.id}`);
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setTableRows(data);
+      }
+    } catch (e) {
+      console.error("Failed exploring catalog tables metadata", e);
+    }
+  };
+
+  const handleCreateRecord = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedDbTable) return;
+    try {
+      const res = await fetch(`/api/db/${selectedDbTable.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newRecordData)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTableRows([...tableRows, data.row]);
+        setNewRecordModalOpen(false);
+        setNewRecordData({});
+        fetchDbTables(); // update counts
+      }
+    } catch (e) {
+      console.error("Failed compiling column inserts", e);
+    }
+  };
+
+  const handleUpdateRecord = async (id: string, recordData: any) => {
+    if (!selectedDbTable) return;
+    try {
+      const res = await fetch(`/api/db/${selectedDbTable.id}/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(recordData)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTableRows(tableRows.map(row => String(row.id || row.ipAddress) === String(id) ? data.row : row));
+        setEditingRowId(null);
+      }
+    } catch (e) {
+      console.error("Failed updating rows indexes", e);
+    }
+  };
+
+  const handleDeleteRecord = async (id: string) => {
+    if (!selectedDbTable) return;
+    if (!confirm("Are you certain you want to remove this record from high fidelity ledger?")) return;
+    try {
+      const res = await fetch(`/api/db/${selectedDbTable.id}/${id}`, {
+        method: "DELETE"
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTableRows(tableRows.filter(row => String(row.id || row.ipAddress) !== String(id)));
+        fetchDbTables(); // update counts
+      }
+    } catch (e) {
+      console.error("Failed pruning data element", e);
+    }
+  };
+
+  const handleAddCustomColumn = async () => {
+    if (!selectedDbTable || !newColumnName) return;
+    try {
+      const res = await fetch(`/api/db/${selectedDbTable.id}/columns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ columnName: newColumnName })
+      });
+      const data = await res.json();
+      if (data.success) {
+        const updatedSchema = [...selectedDbTable.schema, newColumnName];
+        setSelectedDbTable({ ...selectedDbTable, schema: updatedSchema });
+        setNewColumnName('');
+        // Reload row values with default columns populated
+        exploreTable({ ...selectedDbTable, schema: updatedSchema });
+        fetchDbTables();
+      } else {
+        alert(data.error || "Cannot insert custom column.");
+      }
+    } catch (e) {
+      console.error("Column mutation exception:", e);
+    }
+  };
+
+  const handleResetTableState = async (tableName: string) => {
+    if (!confirm(`Are you sure you want to completely erase all row parameters from ${tableName}?`)) return;
+    try {
+      const res = await fetch('/api/db/actions/reset', {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tableName })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTableRows([]);
+        fetchDbTables();
+      }
+    } catch (e) {
+      console.error("Erase table records exception:", e);
+    }
+  };
+
+  const handleRunSQLQuery = async () => {
+    setSqlError('');
+    setSqlResult(null);
+    try {
+      const res = await fetch('/api/db/query', {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: sqlQuery })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSqlResult(data);
+      } else {
+        setSqlError(data.error || "SQL query runtime compiled with error state.");
+      }
+    } catch (e) {
+      setSqlError("Failed communication with active DB query endpoints.");
+    }
+  };
+
+  const handleAISynthesizeData = async () => {
+    if (!selectedDbTable) return;
+    setSynthesizing(true);
+    try {
+      const res = await fetch('/api/db/ai-synthesize', {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tableName: selectedDbTable.id, prompt: aiSynthesisPrompt })
+      });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.rows)) {
+        setTableRows([...tableRows, ...data.rows]);
+        fetchDbTables(); // reload count tags
+      }
+    } catch (e) {
+      console.error("Failed AI synthesis dispatch:", e);
+    } finally {
+      setSynthesizing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'database') {
+      fetchDbTables();
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     localStorage.setItem('theme', theme);
@@ -453,6 +666,38 @@ export default function App() {
     }
   };
 
+  const handleInlineCaseAction = async (
+    caseId: string,
+    actionType: 'LOG_NOTE' | 'PROMISE_TO_PAY' | 'ESCALATE' | 'ASSIGN_AGENT',
+    payload: { note?: string; agentName?: string; amountPromised?: number; datePromised?: string }
+  ) => {
+    try {
+      const res = await fetch('/api/recovery/actions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          caseId,
+          actionType,
+          ...payload
+        })
+      });
+      if (res.ok) {
+        // Clear card-specific operational overrides
+        setActiveCardAction(prev => ({ ...prev, [caseId]: null }));
+        setCardPtpAmount(prev => ({ ...prev, [caseId]: '' }));
+        setCardPtpDate(prev => ({ ...prev, [caseId]: '' }));
+        setCardLogContent(prev => ({ ...prev, [caseId]: '' }));
+        setCardSelectedAgent(prev => ({ ...prev, [caseId]: '' }));
+        fetchAllData();
+      } else {
+        const errVal = await res.json();
+        alert(errVal.error || "Operational pipeline update failed.");
+      }
+    } catch (err) {
+      console.error('Failed to submit inline collections event:', err);
+    }
+  };
+
   const handleTriggerNotification = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!notificationTrigger.borrowerId) return;
@@ -651,6 +896,7 @@ export default function App() {
             { id: 'loans', label: 'Loan Portfolio Management', icon: CreditCard },
             { id: 'recovery', label: 'Overdue Dunning & Cases', icon: ShieldAlert },
             { id: 'audits', label: 'Device & Geo Audits', icon: MapPin },
+            { id: 'database', label: 'Database & Tables', icon: Database },
             { id: 'sdks', label: 'Plug-In SDKs', icon: Sliders },
           ].map((tab) => {
             const Icon = tab.icon;
@@ -1426,89 +1672,647 @@ export default function App() {
         )}
 
         {/* TAB 4: DELINQUENT CASES & WORKFLOW DUNNING */}
-        {activeTab === 'recovery' && (
-          <div id="recovery-tab" className="space-y-8">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-bold text-slate-900">Delinquent Collections Dunning Flow</h2>
-                <p className="text-xs text-slate-500">Coordinate promise-to-pay pledges, agent assignments, and escalating protocols.</p>
+        {activeTab === 'recovery' && (() => {
+          // Filter cases based on search, stage selection, and agent assignment
+          const filteredAndSortedCases = cases.filter(c => {
+            // 1. Search (Borrower Name, ID, or Company Name)
+            if (recoverySearch.trim()) {
+              const q = recoverySearch.toLowerCase().trim();
+              const nameMatch = c.borrowerName.toLowerCase().includes(q) || c.id.toLowerCase().includes(q);
+              const bObj = borrowers.find(b => b.id === c.borrowerId);
+              const compMatch = bObj ? bObj.company.toLowerCase().includes(q) : false;
+              if (!nameMatch && !compMatch) return false;
+            }
+            // 2. Stage Filter
+            if (recoveryStageFilter !== 'All') {
+              if (c.stage !== recoveryStageFilter) return false;
+            }
+            // 3. Agent Filter
+            if (recoveryAgentFilter !== 'All') {
+              if (c.assignedAgent !== recoveryAgentFilter) return false;
+            }
+            return true;
+          }).sort((a, b) => {
+            if (recoverySortBy === 'Days_Overdue_Desc') {
+              return b.daysOverdue - a.daysOverdue;
+            }
+            if (recoverySortBy === 'Days_Overdue_Asc') {
+              return a.daysOverdue - b.daysOverdue;
+            }
+            if (recoverySortBy === 'Overdue_Amount_Desc') {
+              return b.overdueAmount - a.overdueAmount;
+            }
+            if (recoverySortBy === 'Overdue_Amount_Asc') {
+              return a.overdueAmount - b.overdueAmount;
+            }
+            return 0;
+          });
+
+          return (
+            <div id="recovery-tab" className="space-y-8 text-slate-800 dark:text-slate-100 animate-fadeIn">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-white">Delinquent Collections Dunning Flow</h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Coordinate promise-to-pay pledges, agent assignments, and escalating protocols.</p>
+                </div>
               </div>
-            </div>
 
-            <div className="grid grid-cols-3 gap-6">
-              
-              <div className="col-span-3 lg:col-span-2 space-y-6">
+              {/* Advanced Case Filtering and Search Dashboard */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm space-y-4">
+                <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
+                  <Filter className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-405">Filter Recovery Cases</span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end text-xs">
+                  {/* Search Query */}
+                  <div className="space-y-1.5 md:col-span-2">
+                    <label className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                      <Search className="h-3 w-3 text-slate-400" />
+                      <span>Search Borrower, ID, or Company</span>
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-transparent text-slate-900 dark:text-white focus:ring-1 focus:ring-indigo-500"
+                      placeholder="Enter identity or institution..."
+                      value={recoverySearch}
+                      onChange={(e) => setRecoverySearch(e.target.value)}
+                    />
+                  </div>
+
+                  {/* Filter by Agent */}
+                  <div className="space-y-1.5">
+                    <label className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                      <Users className="h-3 w-3 text-slate-400" />
+                      <span>Assigned Recovery Officer</span>
+                    </label>
+                    <select
+                      value={recoveryAgentFilter}
+                      onChange={(e) => setRecoveryAgentFilter(e.target.value)}
+                      className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-950 text-slate-900 dark:text-white text-xs cursor-pointer"
+                    >
+                      <option value="All">All Officers (All Core)</option>
+                      <option value="Aisha Yusuf">Aisha Yusuf (Senior Case Officer)</option>
+                      <option value="Chinedu Okafor">Chinedu Okafor (Field Recovery Lead)</option>
+                      <option value="Olumide Bakare">Olumide Bakare (Court Litigation Counsel)</option>
+                      <option value="Fatima Bello">Fatima Bello (Direct Dialer Agent)</option>
+                    </select>
+                  </div>
+
+                  {/* Sorting */}
+                  <div className="space-y-1.5">
+                    <label className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                      <Clock className="h-3 w-3 text-slate-400" />
+                      <span>Sorting Sequence</span>
+                    </label>
+                    <select
+                      value={recoverySortBy}
+                      onChange={(e) => setRecoverySortBy(e.target.value)}
+                      className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-950 text-slate-900 dark:text-white text-xs cursor-pointer"
+                    >
+                      <option value="Days_Overdue_Desc">Days Overdue (High ➔ Low)</option>
+                      <option value="Days_Overdue_Asc">Days Overdue (Low ➔ High)</option>
+                      <option value="Overdue_Amount_Desc">Overdue Amount (High ➔ Low)</option>
+                      <option value="Overdue_Amount_Asc">Overdue Amount (Low ➔ High)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Stage Filters Row */}
+                <div className="flex flex-wrap items-center justify-between gap-3 text-xs pt-3 border-t border-slate-100 dark:border-slate-800/60">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-slate-400 font-medium mr-1">Escalation Stage:</span>
+                    {['All', 'First_Notice', 'Dunning', 'Legal_Escalation', 'Settlement'].map((st) => {
+                      const isActive = recoveryStageFilter === st;
+                      const label = st === 'All' ? 'All' : st.replace('_', ' ');
+                      return (
+                        <button
+                          key={st}
+                          onClick={() => setRecoveryStageFilter(st)}
+                          className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                            isActive
+                              ? 'bg-indigo-600 text-white shadow-sm'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-755'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Operational totals count and reset tool */}
+                  <div className="flex items-center gap-3 text-slate-500 dark:text-slate-400 font-mono text-[11px]">
+                    <span>
+                      Matching Records: <span className="font-extrabold text-indigo-600 dark:text-indigo-400">{filteredAndSortedCases.length}</span> / {cases.length}
+                    </span>
+                    {(recoverySearch || recoveryStageFilter !== 'All' || recoveryAgentFilter !== 'All') && (
+                      <button
+                        onClick={() => {
+                          setRecoverySearch('');
+                          setRecoveryStageFilter('All');
+                          setRecoveryAgentFilter('All');
+                        }}
+                        className="text-rose-600 hover:underline font-bold cursor-pointer font-sans"
+                      >
+                        Clear Filter Reset ×
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-6">
                 
-                {cases.map(c => (
-                  <div key={c.id} className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm">
-                    {/* Header bar of Case */}
-                    <div className="bg-slate-50/80 p-4 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
-                      <div>
-                        <span className="text-xs text-indigo-700 font-mono font-bold uppercase">{c.stage} STAGE</span>
-                        <h3 className="font-bold text-slate-900">{c.borrowerName} Collections File</h3>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded font-medium">
-                          Agent: {c.assignedAgent}
-                        </span>
-                        <span className="text-rose-700 bg-rose-50 text-xs font-extrabold px-2 py-1 rounded">
-                          {c.daysOverdue} Days Delay
-                        </span>
-                      </div>
+                <div className="col-span-3 lg:col-span-2 space-y-6 animate-fadeIn">
+                  {filteredAndSortedCases.length === 0 ? (
+                    <div className="p-12 text-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl bg-white dark:bg-slate-900 space-y-3">
+                      <p className="font-bold text-slate-700 dark:text-slate-300 text-sm">No delinquent cases found matching query</p>
+                      <p className="text-xs text-slate-405 text-slate-400 dark:text-slate-500 max-w-sm mx-auto font-medium">
+                        Adjust active status filters, reassert search tokens, or view alternative collector schedules.
+                      </p>
                     </div>
+                  ) : (
+                    filteredAndSortedCases.map(c => {
+                      const isExpanded = expandedCaseId === c.id;
+                      const bObj = borrowers.find(b => b.id === c.borrowerId || b.name === c.borrowerName);
+                      const lObj = loans.find(l => l.id === c.loanId);
 
-                    {/* Content Body */}
-                    <div className="p-5 grid grid-cols-1 md:grid-cols-3 gap-5">
-                      <div className="space-y-1">
-                        <span className="text-xs text-slate-400">Total Delinquent Amount Due</span>
-                        <div className="text-2xl font-extrabold text-slate-950">₦{c.overdueAmount.toLocaleString()}</div>
-                      </div>
+                      // Determine active stage color indicator
+                      const activeIndex = ['First_Notice', 'Dunning', 'Legal_Escalation', 'Settlement'].indexOf(c.stage);
 
-                      {/* Promises to Pay Log */}
-                      <div className="md:col-span-2 space-y-2 border-t md:border-t-0 md:border-l border-slate-200 pt-3 md:pt-0 md:pl-5">
-                        <span className="text-xs font-bold text-slate-700 tracking-wider flex items-center gap-1">Pledges &amp; Promises log (PTP)</span>
-                        <div className="mt-2 space-y-1.5">
-                          {c.promiseToPayHistory && c.promiseToPayHistory.length > 0 ? (
-                            c.promiseToPayHistory.map((ptp, i) => (
-                              <div key={i} className="flex items-center justify-between text-xs bg-slate-50 p-2 border border-slate-150 rounded">
-                                <div>
-                                  <span className="font-semibold text-slate-800">Promise ₦{ptp.promisedAmount.toLocaleString()}</span>
-                                  <span className="text-slate-400 font-serif ml-1">for {new Date(ptp.promisedDate).toLocaleDateString()}</span>
-                                </div>
-                                <span className={`text-[10px] uppercase font-mono px-2 py-0.2 rounded ${
-                                  ptp.status === 'Kept' ? 'bg-emerald-100 text-emerald-800' :
-                                  ptp.status === 'Broken' ? 'bg-rose-100 text-rose-800 animate-pulse' : 'bg-yellow-100 text-yellow-800'
-                                }`}>
-                                  {ptp.status}
-                                </span>
-                              </div>
-                            ))
-                          ) : (
-                            <p className="text-xs text-slate-400 italic">No formal active repayment commitments requested.</p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                      // Check for warning signs (over 30 days or broken promises)
+                      const isHighRisk = c.daysOverdue > 30 || c.promiseToPayHistory.some(ptp => ptp.status === 'Broken');
 
-                    {/* Timeline of Logs inside the Case */}
-                    <div className="border-t border-slate-100 bg-slate-50/40 px-5 py-4">
-                      <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-3">Case Audit Logs</h4>
-                      <div className="space-y-2 max-h-40 overflow-y-auto pr-3">
-                        {c.logs.map((log, index) => (
-                          <div key={index} className="text-xs leading-relaxed flex items-start gap-2">
-                            <span className="text-slate-400 font-mono text-[10px] shrink-0 mt-0.5">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                      return (
+                        <div 
+                          key={c.id} 
+                          className={`rounded-xl border transition-all overflow-hidden bg-white dark:bg-slate-900 shadow-sm ${
+                            isHighRisk 
+                              ? 'border-rose-200 dark:border-rose-950/40 ring-1 ring-rose-50/50 dark:ring-rose-950/20' 
+                              : 'border-slate-200 dark:border-slate-800'
+                          }`}
+                        >
+                          {/* Case Title Header */}
+                          <div className="bg-slate-50/80 dark:bg-slate-950/50 p-4 border-b border-slate-200 dark:border-slate-850 flex items-center justify-between flex-wrap gap-3">
                             <div>
-                              <span className="font-bold text-slate-800">[{log.action}]</span>
-                              <span className="text-slate-600"> {log.note}</span>
-                              <span className="text-[#64748b] bg-slate-100 px-1 py-0.2 rounded text-[10px] ml-1 font-mono">{log.agent}</span>
+                              <div className="flex items-center gap-2">
+                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold uppercase tracking-wider ${
+                                  c.stage === 'Settlement' ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-400' :
+                                  c.stage === 'Legal_Escalation' ? 'bg-rose-100 dark:bg-rose-950/40 text-rose-800 dark:text-rose-450 animate-pulse' :
+                                  c.stage === 'Dunning' ? 'bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-400' :
+                                  'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400'
+                                }`}>
+                                  {c.stage.replace('_', ' ')} Stage
+                                </span>
+                                {isHighRisk && (
+                                  <span className="text-[9px] bg-rose-600 text-white font-extrabold px-2 py-0.5 rounded uppercase tracking-wide">
+                                    CRITICAL RETRIEVAL
+                                  </span>
+                                )}
+                              </div>
+                              <h3 className="font-bold text-slate-900 dark:text-white mt-1.5 flex items-center gap-1.5">
+                                <span>{c.borrowerName} Collections File</span>
+                                <span className="text-xs font-mono font-medium text-slate-400 dark:text-slate-500">({c.id})</span>
+                              </h3>
+                            </div>
+
+                            <div className="flex items-center gap-2.5">
+                              {/* Quick expand button */}
+                              <button 
+                                onClick={() => setExpandedCaseId(isExpanded ? null : c.id)}
+                                className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer"
+                              >
+                                {isExpanded ? 'Hide Client Profile' : 'View Client Profile'}
+                              </button>
+                              
+                              <span className="text-rose-750 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/45 text-xs font-extrabold px-2.5 py-1.5 rounded-lg border border-rose-100 dark:border-rose-900/30">
+                                {c.daysOverdue} Days Delay
+                              </span>
                             </div>
                           </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+
+                          {/* Interactive Escalation Progression Steps Visualizer */}
+                          <div className="px-5 py-3.5 bg-indigo-50/10 dark:bg-slate-950/20 border-b border-slate-100 dark:border-slate-850 text-xs">
+                            <div className="flex justify-between items-center text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-2">
+                              <span>Systemic Escalation Pathway Protocol</span>
+                              <span className="text-indigo-650 dark:text-indigo-400 font-mono">Current Level: {activeIndex + 1} / 4</span>
+                            </div>
+                            <div className="grid grid-cols-4 gap-2">
+                              {[
+                                { k: 'First_Notice', label: '1. First Notice' },
+                                { k: 'Dunning', label: '2. Formal Warnings' },
+                                { k: 'Legal_Escalation', label: '3. Legal Prosecution' },
+                                { k: 'Settlement', label: '4. Case Workout' }
+                              ].map((item, idx) => {
+                                const isCurrent = c.stage === item.k;
+                                const isPassed = idx < activeIndex;
+                                return (
+                                  <div key={item.k} className="space-y-1">
+                                    <div className={`h-1.5 rounded ${
+                                      isCurrent ? 'bg-indigo-600 animate-pulse' :
+                                      isPassed ? 'bg-emerald-550 bg-emerald-500' :
+                                      'bg-slate-200 dark:bg-slate-800'
+                                    }`} />
+                                    <span className={`text-[9px] font-semibold block truncate ${
+                                      isCurrent ? 'text-indigo-605 text-indigo-605 dark:text-indigo-400 font-bold' :
+                                      isPassed ? 'text-emerald-650 text-emerald-600 dark:text-emerald-500' : 'text-slate-400'
+                                    }`}>
+                                      {item.label}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Collapsible Client Profile & Guarantee Information Card */}
+                          {isExpanded && (
+                            <div className="p-5 bg-slate-50/80 dark:bg-slate-950/45 border-b border-slate-250 dark:border-slate-850 grid grid-cols-1 md:grid-cols-2 gap-5 text-xs animate-slideDown">
+                              <div className="space-y-2">
+                                <h4 className="font-extrabold text-indigo-700 dark:text-indigo-400 uppercase tracking-wider text-[10px]">Borrower Identity Contact Registry</h4>
+                                <div className="space-y-1.5 text-slate-700 dark:text-slate-300">
+                                  <div className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5 text-slate-400 shrink-0" /> <span className="font-medium">{bObj?.email || 'N/A'}</span></div>
+                                  <div className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5 text-slate-400 shrink-0" /> <span className="font-mono">{bObj?.phone || 'N/A'}</span></div>
+                                  <div className="font-semibold text-slate-600 dark:text-slate-400 flex items-center gap-1">Affiliated Org: <span className="text-slate-900 dark:text-white font-bold ml-1">{bObj?.company || 'Independently Logged'}</span></div>
+                                  {lObj && (
+                                    <div className="text-slate-500 font-mono text-[10.5px]">
+                                      Disbursed: <span className="font-semibold text-slate-700 dark:text-slate-300">{new Date(lObj.startDate).toLocaleDateString()}</span> | Target Repay: <span className="font-semibold text-rose-650">{new Date(lObj.dueDate).toLocaleDateString()}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="space-y-2 bg-white dark:bg-slate-950/20 p-3 rounded-lg border border-slate-150 dark:border-slate-850">
+                                <h4 className="font-bold text-rose-700 dark:text-rose-400 uppercase tracking-wider text-[10px] flex items-center gap-1">
+                                  <Heart className="h-3 w-3 inline shrink-0 text-rose-500" /> Emergency Guarantor Contact Nodes (Legal Backup)
+                                </h4>
+                                {bObj?.emergencyContacts && bObj.emergencyContacts.length > 0 ? (
+                                  <div className="space-y-1">
+                                    {bObj.emergencyContacts.map((contact, idx) => (
+                                      <div key={idx} className="flex justify-between items-center border-b border-slate-100 dark:border-slate-850/60 pb-1.5 last:border-0 last:pb-0">
+                                        <div className="text-slate-750 dark:text-slate-300">
+                                          <span className="font-bold text-slate-900 dark:text-white">{contact.name}</span> ({contact.relationship})
+                                        </div>
+                                        <a href={`tel:${contact.phone}`} className="font-mono text-[10px] text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-0.5 rounded hover:underline">
+                                          {contact.phone}
+                                        </a>
+                                      </div>
+                                    ))}
+                                    <div className="pt-2">
+                                      <button 
+                                        onClick={() => handleInlineCaseAction(c.id, 'LOG_NOTE', { 
+                                          note: `Primary unreachable. Escalated case to emergency co-signee guarantor ${bObj.emergencyContacts[0].name} (${bObj.emergencyContacts[0].phone}) demanding joint liability coverage.`, 
+                                          agentName: currentUser.name 
+                                        })}
+                                        className="text-[10px] w-full text-center uppercase tracking-wide bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300 dark:hover:bg-rose-950/50 font-bold p-1 rounded border border-rose-200/50 cursor-pointer"
+                                      >
+                                        Auto-Log Guarantor Default Notice Demand
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-slate-400 italic">No formal emergency contact guarantee lists declared.</p>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Case Financial Core */}
+                          <div className="p-5 grid grid-cols-1 md:grid-cols-3 gap-5">
+                            <div className="space-y-1 bg-slate-50/50 dark:bg-slate-950/25 p-3.5 rounded-lg border border-slate-150 dark:border-slate-855 dark:border-slate-850">
+                              <span className="text-[10px] text-slate-450 text-slate-400 font-bold uppercase tracking-wider block">Delinquent Ledger Balance</span>
+                              <div className="text-2xl font-black text-rose-600 dark:text-rose-455">₦{c.overdueAmount.toLocaleString()}</div>
+                              <div className="text-[10px] text-slate-500 font-mono mt-1">
+                                Base Loan Reference: {c.loanId}
+                              </div>
+                            </div>
+
+                            {/* Promises to Pay Log */}
+                            <div className="md:col-span-2 space-y-2.5 border-t md:border-t-0 md:border-l border-slate-200 dark:border-slate-800 pt-3 md:pt-0 md:pl-5">
+                              <span className="text-xs font-bold text-slate-700 dark:text-slate-350 tracking-wider flex items-center gap-1.5">
+                                <Plus className="h-3.5 w-3.5 text-indigo-500 shrink-0" /> Repay workout commitments (Promise to Pay - PTP)
+                              </span>
+                              
+                              <div className="space-y-1.5 max-h-24 overflow-y-auto pr-2">
+                                {c.promiseToPayHistory && c.promiseToPayHistory.length > 0 ? (
+                                  c.promiseToPayHistory.map((ptp, i) => (
+                                    <div key={i} className="flex items-center justify-between text-xs bg-slate-50 dark:bg-slate-950/65 p-2.5 border border-slate-150 dark:border-slate-850 rounded-lg shadow-2xs">
+                                      <div>
+                                        <span className="font-bold text-slate-800 dark:text-slate-200">Commit N{ptp.promisedAmount.toLocaleString()}</span>
+                                        <span className="text-slate-400 font-serif ml-1 text-[11px]">vowed for {new Date(ptp.promisedDate).toLocaleDateString()}</span>
+                                      </div>
+                                      <span className={`text-[9px] uppercase font-mono font-bold px-2 py-0.5 rounded ${
+                                        ptp.status === 'Kept' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400' :
+                                        ptp.status === 'Broken' ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/40 dark:text-rose-400 animate-pulse' : 
+                                        'bg-yellow-101 bg-yellow-100 text-yellow-800 dark:bg-yellow-950/40 dark:text-yellow-400'
+                                      }`}>
+                                        {ptp.status}
+                                      </span>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <p className="text-xs text-slate-400 italic py-1">No formal Promise-to-Pay pledges logged.</p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Dynamic Action Control Deck (Case management inline commands) */}
+                          <div className="bg-slate-50/50 dark:bg-slate-950/30 p-3.5 border-t border-slate-150 dark:border-slate-850 flex flex-wrap items-center justify-between gap-3 text-xs">
+                            <div className="text-slate-500 dark:text-slate-400 text-[11px] font-mono">
+                              Assigned Agent: <span className="font-extrabold text-slate-800 dark:text-slate-200">{c.assignedAgent}</span>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                              {/* 1. Log call pill */}
+                              <button 
+                                onClick={() => setActiveCardAction(prev => ({ 
+                                  ...prev, 
+                                  [c.id]: prev[c.id] === 'LOG_NOTE' ? null : 'LOG_NOTE' 
+                                }))}
+                                className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-bold transition-all cursor-pointer ${
+                                  activeCardAction[c.id] === 'LOG_NOTE'
+                                    ? 'bg-indigo-600 border-indigo-600 text-white'
+                                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-350 hover:border-slate-350 hover:bg-slate-50'
+                                }`}
+                              >
+                                Log Collector Call
+                              </button>
+
+                              {/* 2. PTP Commit Pill */}
+                              <button 
+                                onClick={() => setActiveCardAction(prev => ({ 
+                                  ...prev, 
+                                  [c.id]: prev[c.id] === 'PROMISE_TO_PAY' ? null : 'PROMISE_TO_PAY' 
+                                }))}
+                                className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-bold transition-all cursor-pointer ${
+                                  activeCardAction[c.id] === 'PROMISE_TO_PAY'
+                                    ? 'bg-indigo-600 border-indigo-600 text-white'
+                                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-350 hover:border-slate-350 hover:bg-slate-50'
+                                }`}
+                              >
+                                PTP Pledge
+                              </button>
+
+                              {/* 3. Assign Agent Pill */}
+                              <button 
+                                onClick={() => setActiveCardAction(prev => ({ 
+                                  ...prev, 
+                                  [c.id]: prev[c.id] === 'ASSIGN_AGENT' ? null : 'ASSIGN_AGENT' 
+                                }))}
+                                className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-bold transition-all cursor-pointer ${
+                                  activeCardAction[c.id] === 'ASSIGN_AGENT'
+                                    ? 'bg-indigo-600 border-indigo-600 text-white'
+                                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-350 hover:border-slate-355 hover:bg-slate-50'
+                                }`}
+                              >
+                                Reassign Agent
+                              </button>
+
+                              {/* 4. Escalate pill */}
+                              {c.stage !== 'Settlement' && (
+                                <button 
+                                  onClick={() => setActiveCardAction(prev => ({ 
+                                    ...prev, 
+                                    [c.id]: prev[c.id] === 'ESCALATE' ? null : 'ESCALATE' 
+                                  }))}
+                                  className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-bold transition-all cursor-pointer ${
+                                    activeCardAction[c.id] === 'ESCALATE'
+                                      ? 'bg-indigo-600 border-indigo-600 text-white animate-pulse'
+                                      : 'bg-white dark:bg-slate-900 border-rose-200 dark:border-rose-950/40 text-rose-700 dark:text-rose-400 hover:bg-rose-50 hover:border-rose-300'
+                                  }`}
+                                >
+                                  Escalate Case ➔
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Inline Dynamic Sub-forms Drawer Block */}
+                          {activeCardAction[c.id] && (
+                            <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-100/40 dark:bg-slate-950/30 animate-slideDown text-xs">
+                              {/* Option A: Log Call Note */}
+                              {activeCardAction[c.id] === 'LOG_NOTE' && (
+                                <div className="space-y-3">
+                                  <div className="flex items-center justify-between">
+                                    <h4 className="font-extrabold text-slate-900 dark:text-white pb-1">Log Call Note Outcome</h4>
+                                    <span className="text-[10px] text-slate-400">Officer Reference: {currentUser.name}</span>
+                                  </div>
+                                  <div className="space-y-2">
+                                    <textarea
+                                      className="w-full p-2 border border-slate-305 border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                                      placeholder="Identify workout agreements or refusal responses. E.g. borrower requested grace extensions."
+                                      rows={2}
+                                      value={cardLogContent[c.id] || ''}
+                                      onChange={(e) => setCardLogContent(prev => ({ ...prev, [c.id]: e.target.value }))}
+                                    />
+                                    <div className="flex justify-end gap-2">
+                                      <button 
+                                        onClick={() => setActiveCardAction(prev => ({ ...prev, [c.id]: null }))}
+                                        className="px-3 py-1 bg-slate-200 hover:bg-slate-305 dark:bg-slate-800 dark:hover:bg-slate-750 rounded text-slate-700 dark:text-slate-300 font-semibold cursor-pointer"
+                                      >
+                                        Cancel
+                                      </button>
+                                      <button 
+                                        onClick={() => handleInlineCaseAction(c.id, 'LOG_NOTE', { 
+                                          note: cardLogContent[c.id] || 'Called borrower to discuss critical default status.', 
+                                          agentName: currentUser.name 
+                                        })}
+                                        className="px-4 py-1 bg-indigo-600 hover:bg-indigo-750 text-white font-bold rounded cursor-pointer"
+                                      >
+                                        Save Case Note Log
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Option B: New Promise to Pay */}
+                              {activeCardAction[c.id] === 'PROMISE_TO_PAY' && (
+                                <div className="space-y-3">
+                                  <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-1 mb-2">
+                                    <h4 className="font-extrabold text-slate-900 dark:text-white">Record Formal Promise-to-Pay Pledge</h4>
+                                    <span className="text-[10px] text-slate-400">Regulatory Compliance Registry</span>
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-3 pb-2">
+                                    <div className="space-y-1">
+                                      <label className="font-semibold text-slate-700 dark:text-slate-300 block">Pledge Sum Amount (₦)</label>
+                                      <input
+                                        type="number"
+                                        placeholder="150000"
+                                        className="w-full p-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono"
+                                        value={cardPtpAmount[c.id] || ''}
+                                        onChange={(e) => setCardPtpAmount(prev => ({ ...prev, [c.id]: e.target.value }))}
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="font-semibold text-slate-700 dark:text-slate-300 block">Agreed Settlement Date</label>
+                                      <input
+                                        type="date"
+                                        className="w-full p-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 text-slate-900 dark:text-white cursor-pointer"
+                                        value={cardPtpDate[c.id] || ''}
+                                        onChange={(e) => setCardPtpDate(prev => ({ ...prev, [c.id]: e.target.value }))}
+                                      />
+                                    </div>
+                                  </div>
+                                  <div className="space-y-1">
+                                    <label className="font-semibold text-slate-700 dark:text-slate-300 block">Commitment / Settlement Guarantee Notes</label>
+                                    <input
+                                      type="text"
+                                      placeholder="Pledged to settle 50% outstanding amount via central portal transfer."
+                                      className="w-full p-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                                      value={cardLogContent[c.id] || ''}
+                                      onChange={(e) => setCardLogContent(prev => ({ ...prev, [c.id]: e.target.value }))}
+                                    />
+                                  </div>
+                                  <div className="flex justify-end gap-2 pt-1">
+                                    <button 
+                                      onClick={() => setActiveCardAction(prev => ({ ...prev, [c.id]: null }))}
+                                      className="px-3 py-1 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 rounded text-slate-700 dark:text-slate-300 font-semibold cursor-pointer"
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button 
+                                      onClick={() => {
+                                        if (!cardPtpAmount[c.id] || !cardPtpDate[c.id]) {
+                                          alert("Please specify both the pledged amount sum and promised date.");
+                                          return;
+                                        }
+                                        handleInlineCaseAction(c.id, 'PROMISE_TO_PAY', {
+                                          amountPromised: Number(cardPtpAmount[c.id]),
+                                          datePromised: cardPtpDate[c.id],
+                                          note: cardLogContent[c.id] || 'Registered client pledge to settle.',
+                                          agentName: currentUser.name
+                                        });
+                                      }}
+                                      className="px-4 py-1 bg-indigo-600 hover:bg-indigo-750 text-white font-semibold rounded cursor-pointer"
+                                    >
+                                      Commit PTP Schedule
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Option C: Assign Collector Agent */}
+                              {activeCardAction[c.id] === 'ASSIGN_AGENT' && (
+                                <div className="space-y-3">
+                                  <div className="flex items-center justify-between">
+                                    <h4 className="font-extrabold text-slate-900 dark:text-white pb-1">Reassign Case Officer Routing</h4>
+                                    <span className="text-[10px] text-slate-500 font-medium">Currently Managed by {c.assignedAgent}</span>
+                                  </div>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-center">
+                                    <div className="space-y-1">
+                                      <select
+                                        className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-950 text-slate-900 dark:text-white text-xs cursor-pointer"
+                                        value={cardSelectedAgent[c.id] || ''}
+                                        onChange={(e) => setCardSelectedAgent(prev => ({ ...prev, [c.id]: e.target.value }))}
+                                      >
+                                        <option value="">Select custom agent officer...</option>
+                                        <option value="Aisha Yusuf">Aisha Yusuf (Senior Case Officer)</option>
+                                        <option value="Chinedu Okafor">Chinedu Okafor (Field Recovery Lead)</option>
+                                        <option value="Olumide Bakare">Olumide Bakare (Court Litigation Counsel)</option>
+                                        <option value="Fatima Bello">Fatima Bello (Direct Dialer Agent)</option>
+                                      </select>
+                                    </div>
+                                    <div className="flex justify-end gap-2 text-xs">
+                                      <button 
+                                        onClick={() => setActiveCardAction(prev => ({ ...prev, [c.id]: null }))}
+                                        className="px-3 py-1 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 rounded text-slate-700 dark:text-slate-300 font-semibold cursor-pointer"
+                                      >
+                                        Cancel
+                                      </button>
+                                      <button 
+                                        onClick={() => {
+                                          if (!cardSelectedAgent[c.id]) {
+                                            alert("Please choose a recovery specialist first.");
+                                            return;
+                                          }
+                                          handleInlineCaseAction(c.id, 'ASSIGN_AGENT', {
+                                            note: cardSelectedAgent[c.id], // Backend expects note payload as assignee spelling
+                                            agentName: currentUser.name
+                                          });
+                                        }}
+                                        className="px-4 py-1 bg-indigo-600 hover:bg-indigo-750 text-white font-bold rounded cursor-pointer"
+                                      >
+                                        Reassign Agent Now
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Option D: Escalate Protocol Level */}
+                              {activeCardAction[c.id] === 'ESCALATE' && (
+                                <div className="space-y-3">
+                                  <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-1 mb-2">
+                                    <h4 className="font-extrabold text-slate-900 dark:text-white">Perform Stage Escalation</h4>
+                                    <span className="text-[10px] text-rose-600 font-bold uppercase">Severe Action Protocol</span>
+                                  </div>
+                                  <div className="p-3 bg-rose-50 dark:bg-rose-950/20 border border-rose-150 rounded-lg text-slate-700 dark:text-slate-305 space-y-1 mb-2 font-mono text-[11px]">
+                                    <p className="font-bold text-rose-800 dark:text-rose-450">Active Stage: {c.stage.replace('_', ' ')}</p>
+                                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                                      Escalation will trigger systemic flags. For example, moving to 'Legal Escalation' or 'Dunning Warning calls'. All updates are log audited.
+                                    </p>
+                                  </div>
+                                  <div className="space-y-2">
+                                    <input
+                                      type="text"
+                                      className="w-full p-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                                      placeholder="Note reasons for priority escalation (unresponsive client, missed PTP maturity, broken callbacks...)"
+                                      value={cardLogContent[c.id] || ''}
+                                      onChange={(e) => setCardLogContent(prev => ({ ...prev, [c.id]: e.target.value }))}
+                                    />
+                                    <div className="flex justify-end gap-2">
+                                      <button 
+                                        onClick={() => setActiveCardAction(prev => ({ ...prev, [c.id]: null }))}
+                                        className="px-3 py-1 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 rounded text-slate-700 dark:text-slate-300 font-semibold cursor-pointer"
+                                      >
+                                        Cancel
+                                      </button>
+                                      <button 
+                                        onClick={() => {
+                                          handleInlineCaseAction(c.id, 'ESCALATE', {
+                                            note: cardLogContent[c.id] || 'Escalated collections queue protocol stage following prolonged latency.',
+                                            agentName: currentUser.name
+                                          });
+                                        }}
+                                        className="px-4 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded cursor-pointer"
+                                      >
+                                        Confirm Case Escalation
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Historical Timeline Audit Logs */}
+                          <div className="border-t border-slate-100 dark:border-slate-850 bg-slate-50/40 dark:bg-slate-950/20 px-5 py-4">
+                            <h4 className="text-[10px] font-bold text-slate-450 dark:text-slate-500 uppercase tracking-widest mb-3">
+                              Case Audit Log History Trail ({c.logs.length})
+                            </h4>
+                            <div className="space-y-2 max-h-36 overflow-y-auto pr-3 scrollbar-xs">
+                              {c.logs.map((log, index) => (
+                                <div key={index} className="text-xs leading-relaxed flex items-start justify-between gap-3 border-b border-slate-100 dark:border-slate-850/40 pb-2 last:border-0 last:pb-0">
+                                  <div className="flex items-start gap-2 min-w-0">
+                                    <span className="text-slate-400 font-mono text-[9.5px] mt-0.5 shrink-0">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                                    <div>
+                                      <span className="font-extrabold text-indigo-700 dark:text-indigo-400 mr-1 whitespace-nowrap">[{log.action}]</span>
+                                      <span className="text-slate-650 dark:text-slate-300">{log.note}</span>
+                                    </div>
+                                  </div>
+                                  <span className="text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.2 rounded text-[9px] font-mono shrink-0 font-bold">{log.agent}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
 
               {/* Sidebar controls: Log workflows & Trigger Notices */}
               <div className="space-y-6 col-span-3 lg:col-span-1">
@@ -1711,7 +2515,8 @@ export default function App() {
             </div>
 
           </div>
-        )}
+        );
+      })()}
 
         {/* TAB 5: SESSIONS, RECTIFIED DEVICE & GEOLOCATION AUDITING */}
         {activeTab === 'audits' && (() => {
@@ -2120,6 +2925,451 @@ export default function App() {
               </div>
 
             </div>
+          </div>
+        )}
+
+        {/* TAB 7: INTEGRATED SQL PLAYGROUND & VISUAL DATABASE MANAGER */}
+        {activeTab === 'database' && (
+          <div id="database-explorer-tab" className="space-y-8 animate-fadeIn text-slate-800 dark:text-slate-100">
+            {/* Header Description Section */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2 dark:text-white">
+                  <Database className="h-5 w-5 text-indigo-600 animate-pulse" />
+                  Visual Database Management Console & SQL Playground
+                </h2>
+                <p className="text-xs text-slate-500 mt-1 dark:text-slate-400">
+                  Securely interact with the in-memory master ledger. Clear arrays, inject custom schema attributes, trigger real-time artificial record synthesizers or query directly via SQLite terminals.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => fetchDbTables()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 rounded-lg transition-colors cursor-pointer"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${tablesLoading ? 'animate-spin' : ''}`} />
+                  Sync Catalog
+                </button>
+              </div>
+            </div>
+
+            {/* SQL PLAYGROUND COMPILER */}
+            <div className="bg-slate-950 rounded-2xl border border-slate-900 shadow-2xl p-6 relative">
+              <div className="absolute top-4 right-4 text-[10px] font-mono font-black text-rose-500 tracking-wider">
+                SQLITE V3 SIMULATION COGNITIVE ENGINE
+              </div>
+              <div className="flex items-center gap-2 mb-4">
+                <Terminal className="h-5 w-5 text-emerald-400" />
+                <h3 className="text-sm font-bold text-slate-100 font-mono">Simulated Executable SQL Terminal</h3>
+              </div>
+              <p className="text-[11px] text-slate-400 mb-4 tracking-tight leading-relaxed">
+                Test custom projection strings directly matching the database models.
+                Try copying or modifying: <code className="text-emerald-305 font-mono px-1 py-0.5 bg-slate-900 text-emerald-300 rounded select-all">SELECT * FROM borrowers WHERE kycStatus = 'Verified'</code> or <code className="text-emerald-310 font-mono px-1 py-0.5 bg-slate-900 text-emerald-300 rounded select-all">SELECT id, name, role FROM admin_users</code>.
+              </p>
+
+              <div className="flex flex-col lg:flex-row gap-4 mb-4">
+                <div className="flex-1">
+                  <textarea
+                    rows={3}
+                    className="w-full font-mono text-xs text-indigo-300 bg-slate-900 border border-slate-800 rounded-xl p-3 focus:ring-1 focus:ring-indigo-505 focus:border-indigo-505 select-all leading-relaxed outline-none"
+                    value={sqlQuery}
+                    onChange={(e) => setSqlQuery(e.target.value)}
+                    placeholder="SELECT * FROM table_name"
+                  />
+                </div>
+                <div className="flex items-end lg:w-44 lg:flex-none">
+                  <button
+                    onClick={handleRunSQLQuery}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs py-3 px-4 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg hover:shadow-indigo-500/20 shadow-indigo-500/10"
+                  >
+                    <Zap className="h-4 w-4 fill-current text-white" />
+                    Run Query
+                  </button>
+                </div>
+              </div>
+
+              {/* SQL EXECUTOR RESULTS */}
+              {sqlError && (
+                <div className="p-3.5 bg-rose-950/40 border border-rose-900/60 text-rose-300 rounded-xl font-mono text-xs flex gap-2">
+                  <span className="font-sans font-black">✕</span>
+                  {sqlError}
+                </div>
+              )}
+
+              {sqlResult && (
+                <div className="bg-slate-900 rounded-xl border border-slate-800 p-4 space-y-3 animate-slideDown overflow-hidden">
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono border-b border-slate-800 pb-2">
+                    <span>Query: <strong className="text-blue-300 font-normal">{sqlResult.query}</strong></span>
+                    <span className="text-emerald-400 font-bold">{sqlResult.rowCount} rows processed</span>
+                  </div>
+
+                  {sqlResult.rows.length === 0 ? (
+                    <div className="text-xs text-slate-500 font-mono py-4 text-center">
+                      (No matching records retrieved successfully matching selection filter parameters)
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto max-h-[300px]">
+                      <table className="w-full text-left font-mono text-[11px] whitespace-nowrap text-slate-300">
+                        <thead>
+                          <tr className="border-b border-slate-800 text-slate-450 text-slate-400">
+                            {Object.keys(sqlResult.rows[0] || {}).map((col) => (
+                              <th key={col} className="p-2 font-bold select-all tracking-tight uppercase">{col}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800">
+                          {sqlResult.rows.map((row: any, rIdx: number) => (
+                            <tr key={rIdx} className="hover:bg-slate-800/50 transition-colors">
+                              {Object.values(row).map((val: any, cIdx: number) => (
+                                <td key={cIdx} className="p-2 select-all text-slate-300 max-w-[200px] truncate">
+                                  {typeof val === 'object' ? JSON.stringify(val) : String(val)}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* SPLIT SCHEMA PANELS */}
+            {selectedDbTable ? (
+              /* EXPLORE SPREADSHEET workspace */
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-6 space-y-6 animate-scaleUp">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setSelectedDbTable(null)}
+                        className="text-indigo-600 hover:text-indigo-800 text-xs font-bold flex items-center gap-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-400 px-2.5 py-1 rounded-md transition-all cursor-pointer mr-1"
+                      >
+                        ← Back to Index Matrix
+                      </button>
+                      <h3 className="font-extrabold text-lg text-slate-900 dark:text-white font-mono uppercase bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded">
+                        {selectedDbTable.name}
+                      </h3>
+                      <span className="text-xs font-mono font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-400 px-2 py-0.5 rounded-full border border-indigo-100 dark:border-indigo-900/40">
+                        {tableRows.length} total rows
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-2 hover:underline">{selectedDbTable.description}</p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => {
+                        const temp: Record<string, string> = {};
+                        selectedDbTable.schema.forEach((s: string) => { temp[s] = ""; });
+                        setNewRecordData(temp);
+                        setNewRecordModalOpen(true);
+                      }}
+                      className="bg-slate-905 text-white bg-slate-900 dark:bg-white dark:text-slate-900 hover:opacity-90 font-bold text-xs px-3.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Add Record
+                    </button>
+                    <button
+                      onClick={() => handleResetTableState(selectedDbTable.id)}
+                      className="bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 font-bold text-xs px-3 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+                    >
+                      <Trash2 className="h-3.5 w-3.5 text-rose-600" />
+                      Empty Table
+                    </button>
+                  </div>
+                </div>
+
+                {/* ADVANCED ADMIN UTILITY TOOLS */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-50 dark:bg-slate-950 rounded-xl p-5 border border-slate-200 dark:border-slate-800">
+                  
+                  {/* UTILITY 1: AI GEN-SYNTHESIZER */}
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-1">
+                      <Sparkles className="h-3.5 w-3.5 text-indigo-500 animate-bounce" />
+                      AI Cognitive Record Generator
+                    </h4>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Generate 3 brand-new realistic operational objects for <code className="text-slate-900 font-bold font-mono text-[10px] bg-slate-200 dark:bg-slate-800 dark:text-slate-200 px-1 py-0.5 rounded">{selectedDbTable.id}</code> table utilizing structured LLM procedures automatically.
+                    </p>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="e.g., active high-risk loans, pending kyc"
+                        className="flex-1 p-2 text-xs border border-slate-300 dark:border-slate-705 bg-white dark:bg-slate-900 rounded-lg text-slate-900 dark:text-white dark:border-slate-750 focus:ring-1 focus:ring-indigo-505 focus:border-indigo-505"
+                        value={aiSynthesisPrompt}
+                        onChange={(e) => setAiSynthesisPrompt(e.target.value)}
+                      />
+                      <button
+                        onClick={handleAISynthesizeData}
+                        disabled={synthesizing}
+                        className="bg-indigo-600 hover:bg-indigo-700 font-bold text-xs text-white px-3.5 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1"
+                      >
+                        {synthesizing ? (
+                          <>
+                            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                            Synthesizing...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="h-3.5 w-3.5" />
+                            Synthesize Rows
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* UTILITY 2: CUSTOM COLUMN INJECTOR */}
+                  <div className="space-y-2 border-t md:border-t-0 md:border-l border-slate-200 dark:border-slate-800 pt-4 md:pt-0 md:pl-6">
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-1">
+                      <Table className="h-3.5 w-3.5 text-emerald-500" />
+                      Inject Custom DB Column / Property
+                    </h4>
+                    <p className="text-[11px] text-slate-505 dark:text-slate-400">
+                      Alter schema definitions by injecting an administrative property (e.g., <code className="text-emerald-700 font-mono text-[10px] bg-emerald-50 dark:bg-emerald-950/50 dark:text-emerald-300 px-1 py-0.5 rounded font-bold">risk_grade</code> or <code className="text-emerald-700 font-mono text-[10px] bg-emerald-50 dark:bg-emerald-950/50 dark:text-emerald-300 px-1 py-0.5 rounded font-bold">agent_notes</code>) safely.
+                    </p>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="column_name (no spaces e.g., credit_score)"
+                        className="flex-1 p-2 text-xs border border-slate-300 dark:border-slate-705 bg-white dark:bg-slate-900 rounded-lg text-slate-900 dark:text-white dark:border-slate-750 focus:ring-1 focus:ring-indigo-550"
+                        value={newColumnName}
+                        onChange={(e) => setNewColumnName(e.target.value)}
+                      />
+                      <button
+                        onClick={handleAddCustomColumn}
+                        disabled={!newColumnName.trim()}
+                        className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs px-3.5 py-2 rounded-lg transition-colors cursor-pointer"
+                      >
+                        + Create Column
+                      </button>
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* SPREADSHEET GRID FILTER HEADER */}
+                <div className="flex items-center justify-between gap-4">
+                  <div className="relative flex-1 max-w-md">
+                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Keyword filter rows..."
+                      className="w-full pl-9 pr-4 py-2 border border-slate-300 dark:border-slate-700 rounded-xl bg-transparent text-xs font-medium text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-505"
+                      value={searchRowQuery}
+                      onChange={(e) => setSearchRowQuery(e.target.value)}
+                    />
+                  </div>
+                  <div className="text-[11px] text-slate-500 font-mono hidden md:block">
+                    Double-click editable cells or use floating <strong className="font-semibold text-slate-700 dark:text-slate-300">Edit / Update</strong> actions on each line.
+                  </div>
+                </div>
+
+                {/* MASTER SPREADSHEET TABLE IMPLEMENTATION */}
+                <div className="border border-slate-200 dark:border-slate-850 rounded-2xl overflow-hidden shadow-sm">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs text-slate-700 dark:text-slate-300">
+                      <thead>
+                        <tr className="bg-slate-100 dark:bg-slate-950 text-slate-550 dark:text-slate-400 font-mono border-b border-slate-200 dark:border-slate-800 p-2 text-[10px]">
+                          {selectedDbTable.schema.map((col: string) => (
+                            <th key={col} className="p-3.5 font-bold tracking-tight uppercase select-all">
+                              {col}
+                            </th>
+                          ))}
+                          <th className="p-3.5 font-bold text-right uppercase">
+                            Admin Actions
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {tableRows
+                          .filter(row => {
+                            if (!searchRowQuery) return true;
+                            const term = searchRowQuery.toLowerCase();
+                            return Object.values(row).some(v => String(v).toLowerCase().includes(term));
+                          })
+                          .map((row: any) => {
+                            const isRowEditing = editingRowId === String(row.id || row.ipAddress);
+                            const keyId = String(row.id || row.ipAddress);
+
+                            return (
+                              <tr key={keyId} className="hover:bg-slate-50/50 dark:hover:bg-slate-850/40 transition-colors">
+                                {selectedDbTable.schema.map((col: string) => {
+                                  const cellVal = row[col] !== undefined ? row[col] : "";
+                                  return (
+                                    <td key={col} className="p-3 font-medium text-slate-900 max-w-[200px] truncate select-all dark:text-slate-300">
+                                      {isRowEditing ? (
+                                        <input
+                                          type="text"
+                                          className="w-full p-1 border border-indigo-300 dark:bg-slate-900 rounded text-xs select-all text-slate-900 dark:text-white font-mono"
+                                          value={editingRowData[col] !== undefined ? editingRowData[col] : ""}
+                                          onChange={(e) => setEditingRowData({ ...editingRowData, [col]: e.target.value })}
+                                        />
+                                      ) : (
+                                        <span className={col === 'id' || col === 'ipAddress' ? 'font-mono text-[10px] text-zinc-500 font-bold bg-slate-100 dark:bg-slate-800 dark:text-slate-400 px-1.5 py-0.5 rounded border dark:border-slate-750' : 'font-sans font-medium text-slate-900 dark:text-slate-100'}>
+                                          {typeof cellVal === 'object' ? JSON.stringify(cellVal) : String(cellVal)}
+                                        </span>
+                                      )}
+                                    </td>
+                                  );
+                                })}
+
+                                <td className="p-3 text-right">
+                                  {isRowEditing ? (
+                                    <div className="flex gap-1 justify-end">
+                                      <button
+                                        onClick={() => handleUpdateRecord(keyId, editingRowData)}
+                                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] px-2 py-1 rounded cursor-pointer"
+                                      >
+                                        Save
+                                      </button>
+                                      <button
+                                        onClick={() => setEditingRowId(null)}
+                                        className="bg-slate-100 dark:bg-slate-800 text-slate-650 font-bold text-[10px] px-2 py-1 rounded cursor-pointer text-slate-750 text-slate-700 dark:text-slate-300"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div className="flex gap-1 justify-end">
+                                      <button
+                                        onClick={() => {
+                                          setEditingRowId(keyId);
+                                          setEditingRowData({ ...row });
+                                        }}
+                                        className="text-slate-500 hover:text-indigo-600 hover:bg-slate-102 dark:hover:bg-slate-800 p-1.5 rounded cursor-pointer"
+                                        title="Modify Cell Attributes"
+                                      >
+                                        <Edit3 className="h-3.5 w-3.5" />
+                                      </button>
+                                      <button
+                                        onClick={() => handleDeleteRecord(keyId)}
+                                        className="text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 p-1.5 rounded cursor-pointer"
+                                        title="Delete Log"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {tableRows.length === 0 && (
+                    <div className="p-12 text-center text-slate-400 font-mono text-xs bg-slate-50/50 dark:bg-slate-900/10">
+                      (Database table is currently empty of row definitions. Run AI generation procedures or insert records manually)
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              /* CATEGORY TABLE GRID INDEX */
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-505 text-slate-500">Database Models Catalog ({dbTables.length} Tables Registered)</h3>
+                  <span className="text-[10px] font-mono font-bold text-slate-405 text-slate-450 text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">
+                    Total Storage Status: ONLINE
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 animate-scaleUp">
+                  {dbTables.map((table: any) => (
+                    <div
+                      key={table.id}
+                      onClick={() => exploreTable(table)}
+                      className="bg-white dark:bg-slate-900 border border-slate-205 dark:border-slate-800 rounded-xl p-5 hover:border-indigo-500 hover:ring-2 hover:ring-indigo-100 dark:hover:border-indigo-500 dark:hover:ring-indigo-950/40 hover:shadow-md transition-all cursor-pointer flex flex-col justify-between h-44 group"
+                    >
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="p-2 bg-indigo-50 dark:bg-indigo-955 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 group-hover:bg-indigo-600 group-hover:text-white rounded-lg transition-colors">
+                            <Table className="h-4 w-4" />
+                          </div>
+                          <span className="text-[10px] font-mono font-bold text-indigo-700 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-1 rounded-md">
+                            {table.count} rows
+                          </span>
+                        </div>
+                        <h4 className="font-extrabold text-sm text-slate-950 dark:text-white font-mono group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors pt-1 select-all">
+                          {table.name}
+                        </h4>
+                        <p className="text-[10.5px] text-slate-500 dark:text-slate-400 leading-tight line-clamp-2">
+                          {table.description}
+                        </p>
+                      </div>
+
+                      <div className="text-[9px] font-mono text-slate-400 border-t border-slate-100 dark:border-slate-800 pt-2 flex justify-between items-center group-hover:text-indigo-500">
+                        <span>Schema Size: {table.schema.length} fields</span>
+                        <span className="font-extrabold">Explore →</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* DYNAMIC RECORD CONSTRUCT FORM MODAL */}
+            {newRecordModalOpen && selectedDbTable && (
+              <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center z-[99991] p-4 animate-fadeIn">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-lg w-full p-6 space-y-4 animate-scaleUp text-slate-900 dark:text-slate-100">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h3 className="font-extrabold text-lg text-slate-900 dark:text-white font-mono flex items-center gap-2">
+                        <Plus className="h-5 w-5 text-indigo-600" />
+                        INSERT RECORD: {selectedDbTable.name}
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                        Fill in values matching that table's master schema securely below. Missing ID keys are generated dynamically.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setNewRecordModalOpen(false)}
+                      className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 font-black text-lg bg-slate-100 dark:bg-slate-800 rounded-full h-8 w-8 flex items-center justify-center cursor-pointer"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleCreateRecord} className="space-y-4 max-h-[450px] overflow-y-auto pr-1">
+                    {selectedDbTable.schema.map((col: string) => (
+                      <div key={col} className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-600 dark:text-slate-350 uppercase select-none block">
+                          {col} {col === 'id' || col === 'ipAddress' ? '(Auto-Generated if empty)' : ''}
+                        </label>
+                        <input
+                          type="text"
+                          className="w-full p-2.5 border border-slate-300 dark:bg-slate-950 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-900 dark:text-white"
+                          placeholder={`Value for ${col}...`}
+                          value={newRecordData[col] || ''}
+                          onChange={(e) => setNewRecordData({ ...newRecordData, [col]: e.target.value })}
+                        />
+                      </div>
+                    ))}
+
+                    <div className="flex justify-end gap-2 pt-4 border-t border-slate-100 dark:border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setNewRecordModalOpen(false)}
+                        className="bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 font-bold text-xs py-2 px-4 rounded-xl transition-all cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs py-2 px-4 rounded-xl transition-colors cursor-pointer"
+                      >
+                        Execute Insert
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
