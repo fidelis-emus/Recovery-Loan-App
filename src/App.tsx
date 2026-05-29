@@ -156,11 +156,144 @@ export default function App() {
   const [tablesLoading, setTablesLoading] = useState(false);
   const [aiAnalysisResult, setAiAnalysisResult] = useState('');
 
+  // DB Privilege State Management
+  const [dbConfig, setDbConfig] = useState<{
+    globalBorrowerAccessEnabled: boolean;
+    explicitPermittedEmails: string[];
+    accessRequests: Array<{ id: string; name: string; email: string; role: string; status: 'Pending' | 'Approved' | 'Rejected'; requestedAt: string }>;
+    senderAllowed: boolean;
+  } | null>(null);
+  const [dbConfigLoading, setDbConfigLoading] = useState(false);
+  const [accessRequestInputEmail, setAccessRequestInputEmail] = useState('');
+  const [accessRequestStatusLabel, setAccessRequestStatusLabel] = useState<string | null>(null);
+
+  // Dynamic headers wrapper for absolute database security
+  const fetchWithDbHeaders = async (url: string, options: RequestInit = {}) => {
+    const headers = {
+      ...(options.headers || {}),
+      'x-user-email': currentUser.email || '',
+      'x-user-role': currentUser.role || ''
+    };
+    return fetch(url, { ...options, headers });
+  };
+
+  const fetchDbConfig = async () => {
+    setDbConfigLoading(true);
+    try {
+      const res = await fetchWithDbHeaders('/api/db/config');
+      const data = await res.json();
+      setDbConfig(data);
+    } catch (e) {
+      console.error("Failed loading database privilege configs", e);
+    } finally {
+      setDbConfigLoading(false);
+    }
+  };
+
+  const handleToggleGlobalBorrowerAccess = async (enabled: boolean) => {
+    try {
+      const res = await fetchWithDbHeaders('/api/db/config/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setDbConfig(data.config);
+      }
+    } catch (e) {
+      console.error("Failed toggling global borrower access:", e);
+    }
+  };
+
+  const handleGrantExplicitAccess = async (email: string) => {
+    if (!email) return;
+    try {
+      const res = await fetchWithDbHeaders('/api/db/config/grant', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setDbConfig(data.config);
+        setAccessRequestInputEmail('');
+      } else {
+        alert(data.error || "Grant access failed.");
+      }
+    } catch (e) {
+      console.error("Failed granting direct SQL credentials:", e);
+    }
+  };
+
+  const handleRevokeExplicitAccess = async (email: string) => {
+    if (!email) return;
+    try {
+      const res = await fetchWithDbHeaders('/api/db/config/revoke', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setDbConfig(data.config);
+      }
+    } catch (e) {
+      console.error("Failed revoking credentials:", e);
+    }
+  };
+
+  const handleRequestAccess = async () => {
+    try {
+      setAccessRequestStatusLabel("Submitting access request payload...");
+      const res = await fetchWithDbHeaders('/api/db/config/request-access', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: currentUser.name,
+          email: currentUser.email,
+          role: currentUser.role
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAccessRequestStatusLabel(`Request status: ${data.status}. ${data.message || ''}`);
+        fetchDbConfig();
+      } else {
+        setAccessRequestStatusLabel(data.error || "Failed submitting formal database entry application.");
+      }
+    } catch (e) {
+      console.error("Failed registering access query request:", e);
+      setAccessRequestStatusLabel("Offline interaction exception.");
+    }
+  };
+
+  const handleProcessAccessRequest = async (requestId: string, status: 'Approved' | 'Rejected') => {
+    try {
+      const res = await fetchWithDbHeaders('/api/db/config/process-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId, status })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setDbConfig(data.config);
+      }
+    } catch (e) {
+      console.error("Failed routing access request status outcome:", e);
+    }
+  };
+
   // Functions to query backend operations
   const fetchDbTables = async () => {
     setTablesLoading(true);
     try {
-      const res = await fetch('/api/db/tables');
+      const res = await fetchWithDbHeaders('/api/db/tables');
+      if (res.status === 403) {
+        // User not authorized
+        setDbTables([]);
+        return;
+      }
       const data = await res.json();
       if (Array.isArray(data)) {
         setDbTables(data);
@@ -177,7 +310,7 @@ export default function App() {
     setSearchRowQuery('');
     setEditingRowId(null);
     try {
-      const res = await fetch(`/api/db/${tableMeta.id}`);
+      const res = await fetchWithDbHeaders(`/api/db/${tableMeta.id}`);
       const data = await res.json();
       if (Array.isArray(data)) {
         setTableRows(data);
@@ -191,7 +324,7 @@ export default function App() {
     e.preventDefault();
     if (!selectedDbTable) return;
     try {
-      const res = await fetch(`/api/db/${selectedDbTable.id}`, {
+      const res = await fetchWithDbHeaders(`/api/db/${selectedDbTable.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newRecordData)
@@ -211,7 +344,7 @@ export default function App() {
   const handleUpdateRecord = async (id: string, recordData: any) => {
     if (!selectedDbTable) return;
     try {
-      const res = await fetch(`/api/db/${selectedDbTable.id}/${id}`, {
+      const res = await fetchWithDbHeaders(`/api/db/${selectedDbTable.id}/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(recordData)
@@ -230,7 +363,7 @@ export default function App() {
     if (!selectedDbTable) return;
     if (!confirm("Are you certain you want to remove this record from high fidelity ledger?")) return;
     try {
-      const res = await fetch(`/api/db/${selectedDbTable.id}/${id}`, {
+      const res = await fetchWithDbHeaders(`/api/db/${selectedDbTable.id}/${id}`, {
         method: "DELETE"
       });
       const data = await res.json();
@@ -246,7 +379,7 @@ export default function App() {
   const handleAddCustomColumn = async () => {
     if (!selectedDbTable || !newColumnName) return;
     try {
-      const res = await fetch(`/api/db/${selectedDbTable.id}/columns`, {
+      const res = await fetchWithDbHeaders(`/api/db/${selectedDbTable.id}/columns`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ columnName: newColumnName })
@@ -270,7 +403,7 @@ export default function App() {
   const handleResetTableState = async (tableName: string) => {
     if (!confirm(`Are you sure you want to completely erase all row parameters from ${tableName}?`)) return;
     try {
-      const res = await fetch('/api/db/actions/reset', {
+      const res = await fetchWithDbHeaders('/api/db/actions/reset', {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tableName })
@@ -289,7 +422,7 @@ export default function App() {
     setSqlError('');
     setSqlResult(null);
     try {
-      const res = await fetch('/api/db/query', {
+      const res = await fetchWithDbHeaders('/api/db/query', {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: sqlQuery })
@@ -309,7 +442,7 @@ export default function App() {
     if (!selectedDbTable) return;
     setSynthesizing(true);
     try {
-      const res = await fetch('/api/db/ai-synthesize', {
+      const res = await fetchWithDbHeaders('/api/db/ai-synthesize', {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tableName: selectedDbTable.id, prompt: aiSynthesisPrompt })
@@ -328,6 +461,7 @@ export default function App() {
 
   useEffect(() => {
     if (activeTab === 'database') {
+      fetchDbConfig();
       fetchDbTables();
     }
   }, [activeTab]);
@@ -2954,8 +3088,222 @@ export default function App() {
               </div>
             </div>
 
-            {/* SQL PLAYGROUND COMPILER */}
-            <div className="bg-slate-950 rounded-2xl border border-slate-900 shadow-2xl p-6 relative">
+            {/* SECURE DATABASE SANDBOX GATEWAY */}
+            {dbConfigLoading && !dbConfig && (
+              <div className="flex flex-col items-center justify-center p-12 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm">
+                <RefreshCw className="h-8 w-8 text-indigo-500 animate-spin mb-3" />
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Validating security handshakes and query permissions...</p>
+              </div>
+            )}
+
+            {!dbConfigLoading && dbConfig && !dbConfig.senderAllowed && (
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 max-w-2xl mx-auto space-y-6 shadow-sm border-t-4 border-t-indigo-500">
+                <div className="flex flex-col items-center text-center space-y-3">
+                  <div className="p-4 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-full">
+                    <Lock className="h-8 w-8" />
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-900 dark:text-white">Database & Tables Access Restricted</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md leading-relaxed">
+                    The visual SQL workstation contains raw borrower files, payment thresholds, and system credentials. Only administrators can give access to the database catalog.
+                  </p>
+                </div>
+
+                <div className="p-4 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 rounded-xl space-y-3">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-slate-500">Active Identity:</span>
+                    <span className="font-semibold text-slate-800 dark:text-slate-200">{currentUser.name} ({currentUser.email})</span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-slate-500">Workspace Role:</span>
+                    <span className="text-[10px] bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-400 px-2 py-0.5 rounded font-black uppercase tracking-wider">{currentUser.role} Mode</span>
+                  </div>
+
+                  {(() => {
+                    const reqObj = dbConfig.accessRequests.find(r => r.email.toLowerCase() === currentUser.email.toLowerCase());
+                    if (reqObj) {
+                      if (reqObj.status === "Pending") {
+                        return (
+                          <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 text-amber-800 dark:text-amber-400 text-xs rounded-lg flex items-center gap-2">
+                            <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse"></span>
+                            <span>Your Access Request is currently <strong>PENDING</strong> review by Master Operator Fidelis Emus.</span>
+                          </div>
+                        );
+                      } else if (reqObj.status === "Rejected") {
+                        return (
+                          <div className="space-y-3">
+                            <div className="p-3 bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/40 text-rose-800 dark:text-rose-400 text-xs rounded-lg">
+                              ⚠️ Your previous Access Request was <strong>DECLINED</strong> by administrators. You can resubmit or contact support.
+                            </div>
+                            <button
+                              onClick={handleRequestAccess}
+                              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-2 px-4 rounded-xl transition-colors cursor-pointer"
+                            >
+                              Resubmit Access Application
+                            </button>
+                          </div>
+                        );
+                      }
+                    }
+
+                    return (
+                      <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
+                        <button
+                          onClick={handleRequestAccess}
+                          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-2.5 px-4 rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-sm"
+                        >
+                          Request Database View Access Privilege
+                        </button>
+                      </div>
+                    );
+                  })()}
+
+                  {accessRequestStatusLabel && (
+                    <p className="text-[10px] text-center text-indigo-600 dark:text-indigo-400 font-semibold italic animate-pulse mt-2">
+                      {accessRequestStatusLabel}
+                    </p>
+                  )}
+                </div>
+
+                <div className="border-t border-slate-100 dark:border-slate-800 pt-4 text-center">
+                  <p className="text-[10px] text-slate-400">
+                    Need urgent access? Contact Sovereign Security Desk or request elevation to Operator mode.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* ADMIN ACCESS PRIVILEGE MANAGEMENT PANEL */}
+            {dbConfig && dbConfig.senderAllowed && currentUser.role === 'Operator' && (
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-6 space-y-5">
+                <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+                  <Shield className="h-5 w-5 text-indigo-600 animate-pulse" />
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">System Administrative DB & Privilege Control Center</h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">Manage user database access lists, toggle global visibility, or process pending sandbox applications.</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 text-xs text-slate-700 dark:text-slate-300">
+                  {/* Left Column: Access list and sliders */}
+                  <div className="space-y-4">
+                    <div className="p-4 bg-slate-50 dark:bg-slate-950/40 rounded-xl border border-slate-200/60 dark:border-slate-800/60 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-bold text-slate-900 dark:text-white block">Global Guest / Borrower DB Access</span>
+                          <span className="text-[10px] text-slate-400">Allow all login tokens (even Borrower role) to query database</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleGlobalBorrowerAccess(!dbConfig.globalBorrowerAccessEnabled)}
+                          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${dbConfig.globalBorrowerAccessEnabled ? 'bg-indigo-600' : 'bg-slate-200 dark:bg-slate-800'}`}
+                        >
+                          <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${dbConfig.globalBorrowerAccessEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                        </button>
+                      </div>
+
+                      <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
+                        <label className="font-bold text-slate-900 dark:text-white block mb-1">Grant Direct DB Credentials</label>
+                        <div className="flex gap-2">
+                          <input
+                            type="email"
+                            placeholder="collaborator@company.com"
+                            className="flex-1 p-2 border border-slate-300 dark:border-slate-700 dark:bg-slate-950 rounded-lg text-xs"
+                            value={accessRequestInputEmail}
+                            onChange={(e) => setAccessRequestInputEmail(e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleGrantExplicitAccess(accessRequestInputEmail)}
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3 py-1 rounded-lg text-xs transition-colors cursor-pointer"
+                          >
+                            Grant
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <span className="font-bold text-slate-900 dark:text-white block">Explicitly Authorized Accounts</span>
+                      {dbConfig.explicitPermittedEmails.length === 0 ? (
+                        <p className="text-[10px] text-slate-400 italic">No manual emails override lists defined.</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {dbConfig.explicitPermittedEmails.map(email => (
+                            <span key={email} className="inline-flex items-center gap-1.5 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-750 dark:text-indigo-400 px-2.5 py-1 rounded-full text-[10px] border border-indigo-100 dark:border-indigo-900/60 font-medium font-mono">
+                              {email}
+                              {email !== 'fidelisemus@gmail.com' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRevokeExplicitAccess(email)}
+                                  className="text-indigo-500 hover:text-rose-600 cursor-pointer text-xs font-black"
+                                  title="Revoke Permission"
+                                >
+                                  ×
+                                </button>
+                              )}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right Column: Pending Access Requests list */}
+                  <div className="space-y-4">
+                    <span className="font-bold text-slate-900 dark:text-white block border-b border-indigo-500/20 pb-1 font-sans">Sandbox Access Applications & Security Audit</span>
+                    
+                    {dbConfig.accessRequests.length === 0 ? (
+                      <div className="bg-slate-50 dark:bg-slate-950/40 rounded-xl p-4 text-center border border-dashed border-slate-200 dark:border-slate-800">
+                        <p className="text-[10px] text-slate-400 italic">No active access requests pending review.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
+                        {dbConfig.accessRequests.map((reqObj) => (
+                          <div key={reqObj.id} className="flex items-center justify-between p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200/60 dark:border-slate-800/60 rounded-xl">
+                            <div>
+                              <div className="flex items-center gap-1.5 font-sans">
+                                <span className="font-bold text-slate-900 dark:text-white">{reqObj.name}</span>
+                                <span className="text-[8px] bg-slate-200/60 dark:bg-slate-850 px-1 py-0.2 rounded dark:text-slate-400">{reqObj.role}</span>
+                              </div>
+                              <p className="text-[10px] text-slate-500 dark:text-slate-400 font-mono mt-0.5">{reqObj.email}</p>
+                            </div>
+
+                            <div className="flex items-center gap-1.5">
+                              {reqObj.status === "Pending" ? (
+                                <>
+                                  <button
+                                    onClick={() => handleProcessAccessRequest(reqObj.id, 'Approved')}
+                                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1 px-2.5 rounded text-[10px] transition-colors cursor-pointer"
+                                  >
+                                    Approve
+                                  </button>
+                                  <button
+                                    onClick={() => handleProcessAccessRequest(reqObj.id, 'Rejected')}
+                                    className="bg-rose-600 hover:bg-rose-700 text-white font-bold py-1 px-2.5 rounded text-[10px] transition-colors cursor-pointer"
+                                  >
+                                    Reject
+                                  </button>
+                                </>
+                              ) : (
+                                <span className={`text-[9px] font-bold uppercase py-0.5 px-1.5 rounded ${reqObj.status === 'Approved' ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-400' : 'bg-red-950/60 text-rose-500'}`}>
+                                  {reqObj.status}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* MAIN DATABASE VIEW WORKSPACE */}
+            {dbConfig && dbConfig.senderAllowed && (
+              <>
+                {/* SQL PLAYGROUND COMPILER */}
+                <div className="bg-slate-955 bg-slate-950 rounded-2xl border border-slate-900 shadow-2xl p-6 relative">
               <div className="absolute top-4 right-4 text-[10px] font-mono font-black text-rose-500 tracking-wider">
                 SQLITE V3 SIMULATION COGNITIVE ENGINE
               </div>
@@ -3369,6 +3717,8 @@ export default function App() {
                   </form>
                 </div>
               </div>
+            )}
+              </>
             )}
           </div>
         )}

@@ -1065,6 +1065,236 @@ app.post("/api/notifications/trigger", (req, res) => {
 // DYNAMIC DB TABLES & SCHEMAS MANAGEMENT ACTIONS
 // -------------------------------------------------------------
 
+// Privilege management state
+const dbPermissions = {
+  globalBorrowerAccessEnabled: false,
+  explicitPermittedEmails: ["fidelisemus@gmail.com"],
+  accessRequests: [
+    { id: "req_01", name: "Sarah Jenkins", email: "sarah.jenkins@gmail.com", role: "Borrower", status: "Pending", requestedAt: "2026-05-29T08:00:00Z" },
+    { id: "req_02", name: "Adebayo Chukwuma", email: "adebayo.c@yahoo.com", role: "Borrower", status: "Approved", requestedAt: "2026-05-28T14:45:00Z" }
+  ] as Array<{ id: string; name: string; email: string; role: string; status: "Pending" | "Approved" | "Rejected"; requestedAt: string }>
+};
+
+// Helper to check DB access permission
+function checkDbAccess(req: express.Request): { allowed: boolean; reason?: string } {
+  const userEmail = (req.headers["x-user-email"] as string || "").toLowerCase();
+  const userRole = req.headers["x-user-role"] as string;
+
+  // Master operator / system admin always has full privileges
+  if (userRole === "Operator") {
+    return { allowed: true };
+  }
+
+  // Check if email explicitly permitted
+  if (userEmail && dbPermissions.explicitPermittedEmails.some(e => e.toLowerCase() === userEmail)) {
+    return { allowed: true };
+  }
+
+  // Check if approved access request lists
+  const isApproved = dbPermissions.accessRequests.some(
+    r => r.email.toLowerCase() === userEmail && r.status === "Approved"
+  );
+  if (isApproved) {
+    return { allowed: true };
+  }
+
+  // Check global borrower database access override status
+  if (dbPermissions.globalBorrowerAccessEnabled && userRole === "Borrower") {
+    return { allowed: true };
+  }
+
+  return {
+    allowed: false,
+    reason: "Privilege configuration authorization error. The Database & SQL Workspace sandbox is locked. Access must be explicitly granted by an Administrator."
+  };
+}
+
+// Express Authorization Middleware for DB access
+function requireDbAccess(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const check = checkDbAccess(req);
+  if (!check.allowed) {
+    return res.status(403).json({ error: check.reason });
+  }
+  next();
+}
+
+// REST endpoints for access configuration management
+app.get("/api/db/config", (req, res) => {
+  // Return configuration to anyone, but let them know if they are allowed or not
+  const check = checkDbAccess(req);
+  res.json({
+    ...dbPermissions,
+    senderAllowed: check.allowed
+  });
+});
+
+app.post("/api/db/config/toggle", (req, res) => {
+  const senderRole = req.headers["x-user-role"] as string;
+  if (senderRole !== "Operator") {
+    return res.status(403).json({ error: "Only operators can toggle global guest visibility levels." });
+  }
+
+  const { enabled } = req.body;
+  dbPermissions.globalBorrowerAccessEnabled = !!enabled;
+
+  // Audit event logs
+  auditLogsStore.push({
+    id: `aud_${Date.now()}`,
+    action: "PRIVILEGE_MUTATION",
+    detail: `Global borrower database view privilege ${enabled ? 'ENABLED' : 'DISABLED'} by administrator.`,
+    timestamp: new Date().toISOString(),
+    actor: "Admin UI Database Manager"
+  });
+
+  res.json({ success: true, config: dbPermissions });
+});
+
+app.post("/api/db/config/grant", (req, res) => {
+  const senderRole = req.headers["x-user-role"] as string;
+  if (senderRole !== "Operator") {
+    return res.status(403).json({ error: "Only operators can manually authorize explicit user accounts." });
+  }
+
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ error: "E-mail parameter is required." });
+  }
+
+  const lowered = email.toLowerCase().trim();
+  if (!dbPermissions.explicitPermittedEmails.includes(lowered)) {
+    dbPermissions.explicitPermittedEmails.push(lowered);
+  }
+
+  // Mark all pending requests from this email as Approved
+  dbPermissions.accessRequests.forEach(r => {
+    if (r.email.toLowerCase() === lowered) {
+       r.status = "Approved";
+    }
+  });
+
+  // Audit event logs
+  auditLogsStore.push({
+    id: `aud_${Date.now()}`,
+    action: "PRIVILEGE_MUTATION",
+    detail: `Explicit DB permissions granted to account: ${lowered}`,
+    timestamp: new Date().toISOString(),
+    actor: "Admin UI Database Manager"
+  });
+
+  res.json({ success: true, config: dbPermissions });
+});
+
+app.post("/api/db/config/revoke", (req, res) => {
+  const senderRole = req.headers["x-user-role"] as string;
+  if (senderRole !== "Operator") {
+    return res.status(403).json({ error: "Only operators can revoke explicit user database access." });
+  }
+
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ error: "E-mail to revoke is required." });
+  }
+
+  const lowered = email.toLowerCase().trim();
+  dbPermissions.explicitPermittedEmails = dbPermissions.explicitPermittedEmails.filter(e => e.toLowerCase() !== lowered);
+  
+  // Also change status in requests to 'Rejected'
+  dbPermissions.accessRequests.forEach(r => {
+    if (r.email.toLowerCase() === lowered) {
+       r.status = "Rejected";
+    }
+  });
+
+  // Audit event logs
+  auditLogsStore.push({
+    id: `aud_${Date.now()}`,
+    action: "PRIVILEGE_REVOCATION",
+    detail: `Explicit DB permissions revoked from account: ${lowered}`,
+    timestamp: new Date().toISOString(),
+    actor: "Admin UI Database Manager"
+  });
+
+  res.json({ success: true, config: dbPermissions });
+});
+
+app.post("/api/db/config/request-access", (req, res) => {
+  const { name, email, role } = req.body;
+  if (!email) {
+    return res.status(400).json({ error: "Email target is required to process request payload." });
+  }
+
+  const lowered = email.toLowerCase().trim();
+  
+  // Check if they already have access
+  if (dbPermissions.explicitPermittedEmails.includes(lowered)) {
+    return res.json({ success: true, status: "Approved", message: "You already have active authorization!" });
+  }
+
+  // Find if pending request already exists
+  const existing = dbPermissions.accessRequests.find(r => r.email.toLowerCase() === lowered);
+  if (existing) {
+    if (existing.status === "Approved") {
+       return res.json({ success: true, status: "Approved", message: "Your access has already been approved!" });
+    }
+    existing.status = "Pending"; // reset to pending if requested again
+    return res.json({ success: true, status: "Pending", message: "A request is already pending processing." });
+  }
+
+  const newRequest = {
+    id: `req_${Date.now()}`,
+    name: name || "Anonymous User",
+    email: lowered,
+    role: role || "Borrower",
+    status: "Pending" as const,
+    requestedAt: new Date().toISOString()
+  };
+
+  dbPermissions.accessRequests.push(newRequest);
+
+  res.json({ success: true, status: "Pending", request: newRequest });
+});
+
+app.post("/api/db/config/process-request", (req, res) => {
+  const senderRole = req.headers["x-user-role"] as string;
+  if (senderRole !== "Operator") {
+    return res.status(403).json({ error: "Only operators can approve or decline authorization requests." });
+  }
+
+  const { requestId, status } = req.body; // status: 'Approved' | 'Rejected'
+  if (!requestId || !status) {
+    return res.status(400).json({ error: "requestId and status are required." });
+  }
+
+  const reqObj = dbPermissions.accessRequests.find(r => r.id === requestId);
+  if (!reqObj) {
+    return res.status(404).json({ error: "Access request object not identified." });
+  }
+
+  reqObj.status = status;
+
+  if (status === "Approved") {
+    const lowered = reqObj.email.toLowerCase().trim();
+    if (!dbPermissions.explicitPermittedEmails.includes(lowered)) {
+      dbPermissions.explicitPermittedEmails.push(lowered);
+    }
+  } else {
+    // If rejected, clean from explicit permitted emails
+    const lowered = reqObj.email.toLowerCase().trim();
+    dbPermissions.explicitPermittedEmails = dbPermissions.explicitPermittedEmails.filter(e => e.toLowerCase() !== lowered);
+  }
+
+  // Audit event logs
+  auditLogsStore.push({
+    id: `aud_${Date.now()}`,
+    action: "PRIVILEGE_PROCESS",
+    detail: `Database access request from '${reqObj.email}' was '${status}' by admin.`,
+    timestamp: new Date().toISOString(),
+    actor: "Admin UI Database Manager"
+  });
+
+  res.json({ success: true, config: dbPermissions });
+});
+
 // Active schemas registry for added fields
 const customAddedColumns: Record<string, string[]> = {};
 
@@ -1087,7 +1317,7 @@ function getLiveTablesMap() {
 }
 
 // 1. Get List of all 12 DB tables and Row Counts
-app.get("/api/db/tables", (req, res) => {
+app.get("/api/db/tables", requireDbAccess, (req, res) => {
   const liveMap = getLiveTablesMap();
   const tablesMetadata = [
     { id: "admin_users", name: "admin_users", count: liveMap.admin_users.length, description: "System administrators, roles, and credential references.", schema: ["id", "name", "email", "role", "joinedAt"] },
@@ -1117,7 +1347,7 @@ app.get("/api/db/tables", (req, res) => {
 });
 
 // 2. Clear / Populate database tables
-app.post("/api/db/actions/reset", (req, res) => {
+app.post("/api/db/actions/reset", requireDbAccess, (req, res) => {
   // Simple administrative system action to clear rows or seed tables
   const { tableName } = req.body;
   const liveMap = getLiveTablesMap();
@@ -1138,7 +1368,7 @@ app.post("/api/db/actions/reset", (req, res) => {
 });
 
 // 3. Get all records for a specific table
-app.get("/api/db/:tableName", (req, res) => {
+app.get("/api/db/:tableName", requireDbAccess, (req, res) => {
   const { tableName } = req.params;
   const liveMap = getLiveTablesMap();
   const targetArray = (liveMap as any)[tableName.toLowerCase()];
@@ -1150,7 +1380,7 @@ app.get("/api/db/:tableName", (req, res) => {
 });
 
 // 4. Add a record/row to a specific table
-app.post("/api/db/:tableName", (req, res) => {
+app.post("/api/db/:tableName", requireDbAccess, (req, res) => {
   const { tableName } = req.params;
   const liveMap = getLiveTablesMap();
   const targetArray = (liveMap as any)[tableName.toLowerCase()];
@@ -1189,7 +1419,7 @@ app.post("/api/db/:tableName", (req, res) => {
 });
 
 // 5. Update a record in a specific table
-app.put("/api/db/:tableName/:id", (req, res) => {
+app.put("/api/db/:tableName/:id", requireDbAccess, (req, res) => {
   const { tableName, id } = req.params;
   const liveMap = getLiveTablesMap();
   const targetArray = (liveMap as any)[tableName.toLowerCase()];
@@ -1219,7 +1449,7 @@ app.put("/api/db/:tableName/:id", (req, res) => {
 });
 
 // 6. Delete a record from a specific table
-app.delete("/api/db/:tableName/:id", (req, res) => {
+app.delete("/api/db/:tableName/:id", requireDbAccess, (req, res) => {
   const { tableName, id } = req.params;
   const liveMap = getLiveTablesMap();
   const targetArray = (liveMap as any)[tableName.toLowerCase()];
@@ -1248,7 +1478,7 @@ app.delete("/api/db/:tableName/:id", (req, res) => {
 });
 
 // 7. Dynamic Column / Attribute Injection API
-app.post("/api/db/:tableName/columns", (req, res) => {
+app.post("/api/db/:tableName/columns", requireDbAccess, (req, res) => {
   const { tableName } = req.params;
   const { columnName } = req.body;
   
@@ -1280,7 +1510,7 @@ app.post("/api/db/:tableName/columns", (req, res) => {
 });
 
 // 8. Simulated SQL Terminal Compiler Executive
-app.post("/api/db/query", (req, res) => {
+app.post("/api/db/query", requireDbAccess, (req, res) => {
   const { query } = req.body;
   if (!query) {
     return res.status(400).json({ error: "No SQL query provided." });
@@ -1373,7 +1603,7 @@ app.post("/api/db/query", (req, res) => {
 });
 
 // 9. AI-driven record synthesis utilizing Gemini API
-app.post("/api/db/ai-synthesize", async (req, res) => {
+app.post("/api/db/ai-synthesize", requireDbAccess, async (req, res) => {
   const { tableName, prompt } = req.body;
   if (!tableName) {
     return res.status(400).json({ error: "Table name is required." });
@@ -1542,6 +1772,10 @@ async function bootstrap() {
   });
 }
 
-bootstrap().catch((err) => {
-  console.error("Fatal exception booting core express process:", err);
-});
+if (!process.env.VERCEL) {
+  bootstrap().catch((err) => {
+    console.error("Fatal exception booting core express process:", err);
+  });
+}
+
+export default app;
