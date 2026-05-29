@@ -1,0 +1,6 @@
+{
+  "name": "Recovery & Loan Intelligence System",
+  "description": "A secure middleware and risk intelligence core for loan companies, featuring real-time session auditing, IP geolocation tracking, AI-powered default predictions, and an interactive recovery dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

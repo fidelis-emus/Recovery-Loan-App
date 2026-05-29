@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loan-recovery-intelligence-core
+  labels:
+    app: loan-recovery-intelligence
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: loan-recovery-intelligence
+  template:
+    metadata:
+      labels:
+        app: loan-recovery-intelligence
+    spec:
+      containers:
+        - name: app
+          image: gcr.io/loan-company-infra/recovery-intelligence-core:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "3000"
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cloud-run-security-tokens
+                  key: gemini-api-key
+            - name: APP_URL
+              value: "https://api.loan-recovery-intelligence.com"
+          resources:
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+          readinessProbe:
+            httpGet:
+              path: /api/borrowers
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/borrowers
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loan-recovery-intelligence-service
+  labels:
+    app: loan-recovery-intelligence
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 80
+      targetPort: 3000
+      protocol: TCP
+      name: http
+  selector:
+    app: loan-recovery-intelligence
