@@ -5,6 +5,7 @@
 
 import express from "express";
 import path from "path";
+import crypto from "crypto";
 import { GoogleGenAI } from "@google/genai";
 import { 
   Borrower, 
@@ -21,6 +22,276 @@ import {
 // Initialize express app
 const app = express();
 app.use(express.json());
+
+// -------------------------------------------------------------
+// CREDGUARD SUBSCRIPTION LICENSING ENGINE & MIDDIWARE
+// -------------------------------------------------------------
+const LICENSE_SALT = "CredGuardSecretSalt@2026";
+let serverActiveLicenseKey = ""; // Starts empty/unlicensed so the user can test the apply license flow!
+
+function getMonthDifference(date1: Date, date2: Date): number {
+  return (date2.getFullYear() - date1.getFullYear()) * 12 + (date2.getMonth() - date1.getMonth());
+}
+
+function generateLicenseKey(monthStr: string, duration: string): string {
+  // e.g. monthStr = "2026-06", duration = "M" | "Q" | "B" | "A"
+  const formattedMonth = monthStr.replace("-", ""); // "202606"
+  const code = duration.toUpperCase();
+  const hash = crypto.createHash("sha256").update(monthStr + code + LICENSE_SALT).digest("hex").substring(0, 8).toUpperCase();
+  return `CG-${code}${formattedMonth}-${hash}`;
+}
+
+interface ParsedLicense {
+  isValid: boolean;
+  durationCode: string;
+  startDateStr: string; // "YYYY-MM"
+  expirationDate: Date;
+  daysRemaining: number;
+}
+
+function verifyAndParseLicenseKey(key: string, currentMonthStr: string): ParsedLicense {
+  const trimmed = key.trim().toUpperCase();
+  const result: ParsedLicense = {
+    isValid: false,
+    durationCode: "M",
+    startDateStr: currentMonthStr,
+    expirationDate: new Date(),
+    daysRemaining: 0
+  };
+
+  const parts = trimmed.split("-");
+  if (parts.length !== 3 || parts[0] !== "CG") {
+    return result;
+  }
+
+  let duration = "M"; // default
+  let startMonthRaw = "";
+
+  const part1 = parts[1];
+  if (part1.length === 7) {
+    // New format with duration code (e.g. Q202606)
+    duration = part1.substring(0, 1);
+    startMonthRaw = part1.substring(1);
+  } else if (part1.length === 6) {
+    // Old format (pure monthly - 202606)
+    duration = "M";
+    startMonthRaw = part1;
+  } else {
+    return result;
+  }
+
+  // Validate startMonthRaw is YYYYMM
+  if (!/^\d{6}$/.test(startMonthRaw)) {
+    return result;
+  }
+
+  const yearStr = startMonthRaw.substring(0, 4);
+  const monthStr = startMonthRaw.substring(4);
+  const startMonthIso = `${yearStr}-${monthStr}`; // "YYYY-MM"
+
+  // Verify hash integrity
+  let expectedHash = "";
+  if (part1.length === 7) {
+    expectedHash = crypto.createHash("sha256").update(startMonthIso + duration + LICENSE_SALT).digest("hex").substring(0, 8).toUpperCase();
+  } else {
+    expectedHash = crypto.createHash("sha256").update(startMonthIso + LICENSE_SALT).digest("hex").substring(0, 8).toUpperCase();
+  }
+
+  if (expectedHash !== parts[2]) {
+    return result;
+  }
+
+  // Calculate expiration date
+  const startYear = parseInt(yearStr, 10);
+  const startMonthIndex = parseInt(monthStr, 10); // 1-index
+  let planMonths = 1;
+  if (duration === "Q") planMonths = 3;
+  else if (duration === "B") planMonths = 6;
+  else if (duration === "A") planMonths = 12;
+
+  // Lease expires at the absolute end of the duration period
+  // e.g. Monthly for 2026-06 starts 2026-06-01, expires 2026-07-01 (1st of next month)
+  const expirationDate = new Date(startYear, startMonthIndex - 1 + planMonths, 1, 0, 0, 0, 0);
+
+  // Parse current system date (the server's actual clock time)
+  const now = new Date();
+  
+  // Is current time less than the expiration date, and not before start date?
+  const startDate = new Date(startYear, startMonthIndex - 1, 1, 0, 0, 0, 0);
+  const isValid = now.getTime() >= startDate.getTime() && now.getTime() < expirationDate.getTime();
+
+  const daysRemaining = (expirationDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000);
+
+  return {
+    isValid,
+    durationCode: duration,
+    startDateStr: startMonthIso,
+    expirationDate,
+    daysRemaining
+  };
+}
+
+function isLicenseValidForCurrentMonth(): boolean {
+  if (!serverActiveLicenseKey) return false;
+  const currentMonth = new Date().toISOString().substring(0, 7);
+  const parsed = verifyAndParseLicenseKey(serverActiveLicenseKey, currentMonth);
+  return parsed.isValid;
+}
+
+// License guard middleware
+app.use((req, res, next) => {
+  // Allow static assets, favicon, frontend pages served by Vite/Express
+  if (!req.path.startsWith("/api")) {
+    return next();
+  }
+  
+  // Allow all license operations, plus login/register endpoints so users can authenticate
+  if (
+    req.path === "/api/license/status" ||
+    req.path === "/api/license/apply" ||
+    req.path === "/api/license/generate" ||
+    req.path === "/api/auth/login" ||
+    req.path === "/api/auth/register"
+  ) {
+    return next();
+  }
+
+  // If the license is not entered or not valid for the current month, lock all other API operations
+  if (!isLicenseValidForCurrentMonth()) {
+    const currentMonth = new Date().toISOString().substring(0, 7);
+    return res.status(402).json({
+      error: "Licensing Error: Your subscription license has expired or has not been applied.",
+      licenseExpired: true,
+      currentMonth
+    });
+  }
+
+  next();
+});
+
+// -------------------------------------------------------------
+// LICENSE MANAGEMENT ENDPOINTS
+// -------------------------------------------------------------
+
+// Get License Status
+app.get("/api/license/status", (req, res) => {
+  const currentMonth = new Date().toISOString().substring(0, 7);
+  
+  if (!serverActiveLicenseKey) {
+    return res.json({
+      isValid: false,
+      currentMonth,
+      expiresAt: null,
+      daysRemaining: null,
+      activeLicenseKey: null,
+      durationCode: null,
+      requiredFormat: `CG-M${currentMonth.replace("-", "")}-XXXXXXXX`
+    });
+  }
+
+  const parsed = verifyAndParseLicenseKey(serverActiveLicenseKey, currentMonth);
+  res.json({
+    isValid: parsed.isValid,
+    currentMonth,
+    expiresAt: parsed.expirationDate.toISOString(),
+    daysRemaining: parsed.daysRemaining,
+    activeLicenseKey: serverActiveLicenseKey,
+    durationCode: parsed.durationCode,
+    requiredFormat: `CG-${parsed.durationCode || "M"}${currentMonth.replace("-", "")}-XXXXXXXX`
+  });
+});
+
+// Generate License Key for any specified month and subscription tier (Requires Admin credentials)
+app.post("/api/license/generate", (req, res) => {
+  const { email, password, targetMonth, duration } = req.body;
+  if (!email || !targetMonth) {
+    return res.status(400).json({ error: "Email and targetMonth (YYYY-MM) are required parameters." });
+  }
+
+  // Validate super admin authority
+  if (email.toLowerCase() !== "fidelisemus@gmail.com" || password !== "admin123") {
+    return res.status(403).json({ error: "Access Denied: Only the Master System Administrator (fidelisemus@gmail.com) can generate subscription license keys." });
+  }
+
+  const monthRegex = /^\d{4}-\d{2}$/;
+  if (!monthRegex.test(targetMonth)) {
+    return res.status(400).json({ error: "Invalid targetMonth format. Please use YYYY-MM structure (e.g. 2026-06)." });
+  }
+
+  // Determine duration code
+  let durationCode = "M";
+  const rawDuration = String(duration || "monthly").toLowerCase();
+  if (rawDuration === "q" || rawDuration === "quarterly") {
+    durationCode = "Q";
+  } else if (rawDuration === "b" || rawDuration === "biannually" || rawDuration === "bi-annually" || rawDuration === "bi_annually") {
+    durationCode = "B";
+  } else if (rawDuration === "a" || rawDuration === "annually" || rawDuration === "annual") {
+    durationCode = "A";
+  }
+
+  const generatedKey = generateLicenseKey(targetMonth, durationCode);
+  res.json({
+    success: true,
+    targetMonth,
+    duration: durationCode,
+    key: generatedKey
+  });
+});
+
+// Apply License Key
+app.post("/api/license/apply", (req, res) => {
+  const { key } = req.body;
+  if (!key) {
+    return res.status(400).json({ error: "License key parameter is missing." });
+  }
+
+  const trimmedKey = key.trim();
+  const currentMonth = new Date().toISOString().substring(0, 7);
+
+  const parsed = verifyAndParseLicenseKey(trimmedKey, currentMonth);
+  if (parsed.isValid) {
+    serverActiveLicenseKey = trimmedKey;
+    let planName = "Monthly";
+    if (parsed.durationCode === "Q") planName = "Quarterly";
+    else if (parsed.durationCode === "B") planName = "Bi-Annually";
+    else if (parsed.durationCode === "A") planName = "Annually";
+
+    return res.json({
+      success: true,
+      message: `License key applied successfully! CredGuard has been unlocked under a ${planName} lease (expires on ${parsed.expirationDate.toISOString().substring(0, 10)}).`
+    });
+  } else {
+    // Check if key structure matches block for error feedback
+    const parts = trimmedKey.split("-");
+    if (parts.length === 3 && parts[0].toUpperCase() === "CG") {
+      const part1 = parts[1];
+      let duration = "M";
+      let rawMonth = "";
+      if (part1.length === 7) {
+        duration = part1.substring(0, 1);
+        rawMonth = part1.substring(1);
+      } else if (part1.length === 6) {
+        rawMonth = part1;
+      }
+      
+      if (/^\d{6}$/.test(rawMonth)) {
+        const estMonth = `${rawMonth.substring(0, 4)}-${rawMonth.substring(4)}`;
+        const testParsed = verifyAndParseLicenseKey(trimmedKey, estMonth);
+        if (testParsed.expirationDate.getTime() < Date.now()) {
+          return res.status(400).json({
+            error: `This license key has expired! It was valid from ${testParsed.startDateStr} until ${testParsed.expirationDate.toISOString().substring(0, 10)}. Please generate and apply a new key.`
+          });
+        } else if (testParsed.startDateStr > currentMonth) {
+          return res.status(400).json({
+            error: `This license key is scheduled for a future period starting ${testParsed.startDateStr}. It cannot be activated for the current month '${currentMonth}' yet.`
+          });
+        }
+      }
+    }
+    
+    return res.status(400).json({ error: "Invalid license key signature. Check spelling and ensure keys are generated correctly from the administrator panel." });
+  }
+});
 
 const PORT = 3000;
 

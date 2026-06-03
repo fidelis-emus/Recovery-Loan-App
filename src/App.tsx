@@ -33,6 +33,7 @@ import {
   Filter,
   RefreshCw,
   Sliders,
+  ArrowLeft,
   Shield,
   LifeBuoy,
   Sun,
@@ -50,6 +51,9 @@ import {
 import { Borrower, Loan, Payment, UserSession, RiskAlert, RecoveryCase, NotificationLog, GeoLocation } from './types';
 import { SDK_TEMPLATES } from './utils/sdkTemplates';
 import { TravelMap } from './components/TravelMap';
+
+const VITE_APP_MODE = (((import.meta as any).env?.VITE_APP_MODE || 'both') as string).toLowerCase();
+const VITE_ADMIN_PORTAL_URL = ((import.meta as any).env?.VITE_ADMIN_PORTAL_URL || '') as string;
 
 export default function App() {
   // Navigation Tabs
@@ -161,14 +165,185 @@ export default function App() {
   const [accessRequestInputEmail, setAccessRequestInputEmail] = useState('');
   const [accessRequestStatusLabel, setAccessRequestStatusLabel] = useState<string | null>(null);
 
-  // Dynamic headers wrapper for absolute database security
+  // -------------------------------------------------------------
+  // CREDGUARD MONTHLY LICENSING LOGIC & ACTIVATION STATES
+  // -------------------------------------------------------------
+  const [currentPath, setCurrentPath] = useState(() => {
+    if (VITE_APP_MODE === 'admin') {
+      return '/license-admin';
+    }
+    return window.location.pathname;
+  });
+
+  useEffect(() => {
+    const handlePopState = () => {
+      if (VITE_APP_MODE === 'admin') {
+        setCurrentPath('/license-admin');
+      } else {
+        setCurrentPath(window.location.pathname);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const navigateTo = (path: string) => {
+    if (VITE_APP_MODE === 'admin') {
+      window.history.pushState(null, '', '/license-admin');
+      setCurrentPath('/license-admin');
+      return;
+    }
+    if (path === '/license-admin' && VITE_APP_MODE === 'app') {
+      if (VITE_ADMIN_PORTAL_URL) {
+        window.open(VITE_ADMIN_PORTAL_URL, '_blank', 'noopener,noreferrer');
+        return;
+      }
+    }
+    window.history.pushState(null, '', path);
+    setCurrentPath(path);
+  };
+
+  const [licenseStatus, setLicenseStatus] = useState<{
+    isValid: boolean;
+    currentMonth: string;
+    expiresAt?: string;
+    activeLicenseKey?: string | null;
+    requiredFormat?: string;
+    daysRemaining?: number | null;
+    durationCode?: string | null;
+  } | null>(null);
+  const [isLicenseChecking, setIsLicenseChecking] = useState(true);
+  const [enteredLicenseKey, setEnteredLicenseKey] = useState('');
+  const [licenseError, setLicenseError] = useState('');
+  const [licenseSuccess, setLicenseSuccess] = useState('');
+  
+  // Licensing Key Generator Fields
+  const [genAdminEmail, setGenAdminEmail] = useState('');
+  const [genAdminPassword, setGenAdminPassword] = useState('');
+  const [genTargetMonth, setGenTargetMonth] = useState('');
+  const [genDuration, setGenDuration] = useState('monthly');
+  const [generatedLicenseKey, setGeneratedLicenseKey] = useState('');
+  const [genError, setGenError] = useState('');
+  const [genSuccess, setGenSuccess] = useState('');
+  const [showLicenseGenerator, setShowLicenseGenerator] = useState(false);
+  const [showRenewalModal, setShowRenewalModal] = useState(false);
+  const [isAdminVerified, setIsAdminVerified] = useState(false);
+  const [showAdminGate, setShowAdminGate] = useState(false);
+  const [adminGatePassword, setAdminGatePassword] = useState('');
+  const [adminGateError, setAdminGateError] = useState('');
+
+  const fetchLicenseStatus = async () => {
+    setIsLicenseChecking(true);
+    setLicenseError('');
+    try {
+      const res = await fetch('/api/license/status');
+      const data = await res.json();
+      setLicenseStatus(data);
+    } catch (e) {
+      console.error("Failed fetching subscription license status", e);
+    } finally {
+      setIsLicenseChecking(false);
+    }
+  };
+
+  const handleApplyLicense = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setLicenseError('');
+    setLicenseSuccess('');
+    
+    // Fallback to checking state if called with a direct key
+    const finalKey = e ? enteredLicenseKey : undefined;
+    const keyToSubmit = finalKey || enteredLicenseKey;
+
+    if (!keyToSubmit) {
+      setLicenseError('Please enter a subscription license key.');
+      return;
+    }
+    try {
+      const res = await fetch('/api/license/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: keyToSubmit })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setLicenseError(data.error || 'Server rejected license key compilation.');
+      } else {
+        setLicenseSuccess(data.message || 'CredGuard successfully unlocked.');
+        setEnteredLicenseKey('');
+        // Refresh status
+        setTimeout(() => {
+          fetchLicenseStatus();
+        }, 1200);
+      }
+    } catch (err) {
+      setLicenseError('Failed to communicate with licensing compiler.');
+    }
+  };
+
+  const handleGenerateLicenseKey = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setGenError('');
+    setGenSuccess('');
+    setGeneratedLicenseKey('');
+    if (!genAdminEmail || !genAdminPassword || !genTargetMonth) {
+      setGenError('All administrator authorization and monthly parameters are required.');
+      return;
+    }
+    try {
+      const res = await fetch('/api/license/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: genAdminEmail,
+          password: genAdminPassword,
+          targetMonth: genTargetMonth,
+          duration: genDuration
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setGenError(data.error || 'Authentication check failed. License generation rejected.');
+      } else {
+        setGeneratedLicenseKey(data.key);
+        let durationLabel = "Monthly";
+        if (data.duration === "Q") durationLabel = "Quarterly";
+        else if (data.duration === "B") durationLabel = "Bi-Annually";
+        else if (data.duration === "A") durationLabel = "Annually";
+        setGenSuccess(`Key compiled successfully for ${durationLabel} subscription starting ${data.targetMonth}!`);
+      }
+    } catch (err) {
+      setGenError('License compiler transmission error.');
+    }
+  };
+
+  useEffect(() => {
+    fetchLicenseStatus();
+  }, []);
+
+  useEffect(() => {
+    if (licenseStatus && !genTargetMonth) {
+      setGenTargetMonth(licenseStatus.currentMonth);
+    }
+  }, [licenseStatus, genTargetMonth]);
+
+  // Dynamic headers wrapper with automatic monthly licensing expired check
   const fetchWithDbHeaders = async (url: string, options: RequestInit = {}) => {
     const headers = {
       ...(options.headers || {}),
       'x-user-email': currentUser?.email || '',
       'x-user-role': currentUser?.role || ''
     };
-    return fetch(url, { ...options, headers });
+    try {
+      const res = await fetch(url, { ...options, headers });
+      if (res.status === 402) {
+        fetchLicenseStatus(); // re-verify lock screen status
+      }
+      return res;
+    } catch (e) {
+      console.error(`Fetch encountered transmission error on ${url}:`, e);
+      throw e;
+    }
   };
 
   const fetchDbConfig = async () => {
@@ -872,6 +1047,579 @@ export default function App() {
     ? Math.round((resolvedCasesCount / totalOverdueCasesCount) * 100)
     : 0;
 
+  if (isLicenseChecking) {
+    return (
+      <div className={`min-h-screen ${theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} flex flex-col items-center justify-center p-4`}>
+        <div className="flex flex-col items-center space-y-4 animate-pulse">
+          <RefreshCw className="h-8 w-8 animate-spin text-indigo-600 dark:text-indigo-400" />
+          <p className="text-xs font-mono tracking-widest uppercase text-slate-500 dark:text-slate-400">Verifying CredGuard System License...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (currentPath === '/license-admin' && VITE_APP_MODE === 'app') {
+    return (
+      <div className={`min-h-screen ${theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans antialiased flex items-center justify-center p-4 transition-colors duration-200`}>
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-8 space-y-6 text-slate-800 dark:text-slate-100 text-center">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-650 dark:text-indigo-400 shadow-inner">
+            <Lock className="h-6 w-6" />
+          </div>
+          <div className="space-y-2">
+            <h1 className="text-xl font-black tracking-tight text-slate-900 dark:text-white uppercase font-sans">Separate Portal Required</h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+              This environment runs the isolated **Loan Recovery System**. To preserve structural isolation of license administration credentials, the central generator is hosted on its own standalone URL.
+            </p>
+          </div>
+
+          <div className="space-y-3 pt-2">
+            {VITE_ADMIN_PORTAL_URL ? (
+              <a
+                href={VITE_ADMIN_PORTAL_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg text-xs transition-colors cursor-pointer shadow-md shadow-indigo-600/10 flex items-center justify-center space-x-2"
+              >
+                <Shield className="h-4 w-4" />
+                <span>Go to Dedicated License Administration &rarr;</span>
+              </a>
+            ) : (
+              <div className="p-3 bg-slate-100 dark:bg-slate-800/80 text-left rounded-lg text-[11px] text-slate-500 font-mono">
+                💡 <span className="font-bold">Notice to Owner:</span> Set the <span className="font-bold text-slate-900 dark:text-white">VITE_ADMIN_PORTAL_URL</span> environment variable in Railway to point to your separate Administration server deployment URL.
+              </div>
+            )}
+
+            <button
+              onClick={() => navigateTo('/')}
+              className="w-full text-center text-xs text-indigo-600 hover:underline transition-colors mt-2 font-bold cursor-pointer"
+            >
+              Back to Loan Recovery Workspace
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (currentPath === '/license-admin' && !isAdminVerified && currentUser?.role !== 'Operator') {
+    return (
+      <div className={`min-h-screen ${theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans antialiased flex items-center justify-center p-4 transition-colors duration-200 relative`}>
+        {/* Real-time Theme Toggle Switcher */}
+        <div className="absolute top-4 right-4 z-50">
+          <button
+            onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+            title={theme === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+            className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-800 transition-colors cursor-pointer"
+          >
+            {theme === 'light' ? <Moon className="h-4.5 w-4.5" /> : <Sun className="h-4.5 w-4.5" />}
+          </button>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-8 space-y-6 text-slate-800 dark:text-slate-100">
+          <div className="text-center space-y-2">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 shadow-inner">
+              <Shield className="h-6 w-6" />
+            </div>
+            <h1 className="text-xl font-black tracking-tight text-slate-900 dark:text-white uppercase font-sans">Admin Console Locked</h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              This terminal is a separated administration zone. Please verify your authority to generate system leases.
+            </p>
+          </div>
+
+          <div className="space-y-4">
+            {adminGateError && (
+              <div className="p-3 bg-rose-50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/45 text-rose-700 dark:text-rose-400 rounded-xl text-xs font-semibold">
+                ⚠️ {adminGateError}
+              </div>
+            )}
+
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              if (adminGatePassword === 'admin123') {
+                setIsAdminVerified(true);
+                setAdminGateError('');
+              } else {
+                setAdminGateError('Invalid Authority Password');
+              }
+            }} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">Authority Password</label>
+                <input
+                  type="password"
+                  required
+                  placeholder="••••••••"
+                  className="w-full p-3 font-mono border border-slate-300 dark:border-slate-700 rounded-lg bg-transparent text-xs text-center tracking-widest focus:ring-2 focus:ring-indigo-600 text-slate-900 dark:text-white"
+                  value={adminGatePassword}
+                  onChange={e => {
+                    setAdminGatePassword(e.target.value);
+                    setAdminGateError('');
+                  }}
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-lg text-xs transition-colors cursor-pointer shadow-md shadow-indigo-600/10 flex items-center justify-center space-x-2"
+              >
+                <Shield className="h-4 w-4" />
+                <span>Verify Master Authority</span>
+              </button>
+            </form>
+
+            <button
+              onClick={() => navigateTo('/')}
+              className="w-full text-center text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors cursor-pointer"
+            >
+              Return to Public Gateway
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (currentPath === '/license-admin') {
+    return (
+      <div className={`min-h-screen ${theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans antialiased transition-colors duration-200`}>
+        {/* Navigation / Header */}
+        <header className="border-b border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-900/50 backdrop-blur-md sticky top-0 z-40">
+          <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="h-9 w-9 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-md shadow-indigo-600/20">
+                <Shield className="h-5 w-5" />
+              </div>
+              <div>
+                <h1 className="text-sm font-black tracking-tight text-slate-900 dark:text-white uppercase">CredGuard™ Admin Portal</h1>
+                <p className="text-[9px] text-indigo-600 dark:text-indigo-400 font-mono tracking-widest font-black">Subscription License Controller</p>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-3">
+              {/* Real-time Theme Toggle Switcher */}
+              <button
+                type="button"
+                onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+                title={theme === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+                className="p-1.5 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+              >
+                {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+              </button>
+
+              {/* Back to main software workspace */}
+              {VITE_APP_MODE === 'admin' ? (
+                <div className="text-[10px] bg-emerald-550/15 text-emerald-600 dark:text-emerald-400 px-2.5 py-1.5 rounded-lg font-black uppercase tracking-wider font-mono border border-emerald-500/20 shadow-sm">
+                  ⚡ Dedicated Admin Server
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => navigateTo('/')}
+                  className="text-xs bg-slate-900 hover:bg-black dark:bg-slate-800 dark:hover:bg-slate-700 text-white dark:text-slate-200 py-1.5 px-3 rounded-lg font-bold transition-all shadow-sm flex items-center space-x-1.5 cursor-pointer"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                  <span>Return to Workspace</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </header>
+
+        {/* Dedicated Admin Portal container */}
+        <div id="license-admin-panel" className="mx-auto max-w-7xl px-4 py-8 sm:px-6 space-y-6">
+          
+          {/* Intro welcome Card */}
+          <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-950 text-white rounded-2xl p-6 shadow-xl border border-indigo-900/40">
+            <div className="space-y-2">
+              <span className="text-[9px] bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 font-bold px-2 py-0.5 rounded uppercase tracking-wider font-mono">Separate License Manager Zone</span>
+              <h2 className="text-xl font-black">Enterprise Subscription Lease Generator</h2>
+              <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
+                Welcome to the separated administrative terminal. Here, you generate and verify cryptographically signed system leases for CredGuard based on multiple subscription tiers (Monthly, Quarterly, Bi-Annually, or Annually). Once generated, licenses can be activated to unlock user interfaces.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            
+            {/* COLUMN 1: COMPILER & GENERATOR */}
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm lg:col-span-12 xl:col-span-7 space-y-6">
+              <div className="flex items-center space-x-2 pb-4 border-b border-slate-100 dark:border-slate-800">
+                <Cpu className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                <div>
+                  <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase">License compiler block</h3>
+                  <p className="text-[10px] text-slate-400 font-mono">Generate subscription activation codes</p>
+                </div>
+              </div>
+
+              {genError && (
+                <div className="p-3 bg-rose-50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/45 text-rose-700 dark:text-rose-400 rounded-xl text-xs font-semibold">
+                  ⚠️ {genError}
+                </div>
+              )}
+
+              {genSuccess && (
+                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/45 text-emerald-700 dark:text-emerald-400 rounded-xl text-xs font-semibold">
+                  ✨ {genSuccess}
+                </div>
+              )}
+
+              <form onSubmit={handleGenerateLicenseKey} className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">Master Admin Email</label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="fidelisemus@gmail.com"
+                      className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-transparent text-xs text-slate-900 dark:text-white focus:ring-1 focus:ring-indigo-600 font-semibold"
+                      value={genAdminEmail}
+                      onChange={e => setGenAdminEmail(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">Authority Password</label>
+                    <input
+                      type="password"
+                      required
+                      placeholder="••••••••"
+                      className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-transparent text-xs text-slate-900 dark:text-white focus:ring-1 focus:ring-indigo-600 font-semibold"
+                      value={genAdminPassword}
+                      onChange={e => setGenAdminPassword(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">Target Start Month (YYYY-MM)</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="YYYY-MM (e.g. 2026-06)"
+                      className="w-full p-2.5 font-mono border border-slate-300 dark:border-slate-700 rounded-lg bg-transparent text-xs text-slate-900 dark:text-white text-center font-bold focus:ring-1 focus:ring-indigo-600"
+                      value={genTargetMonth}
+                      onChange={e => setGenTargetMonth(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">Subscription Duration</label>
+                    <select
+                      value={genDuration}
+                      onChange={e => setGenDuration(e.target.value)}
+                      className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white focus:ring-1 focus:ring-indigo-600 font-bold"
+                    >
+                      <option value="monthly">Monthly Subscription (1 month active)</option>
+                      <option value="quarterly">Quarterly Subscription (3 months active)</option>
+                      <option value="biannually">Bi-Annually Subscription (6 months active)</option>
+                      <option value="annually">Annually Subscription (12 months active)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs transition-colors cursor-pointer shadow-md"
+                >
+                  <Cpu className="h-4 w-4 animate-pulse" />
+                  <span>Compile and Crypt Sign Lease</span>
+                </button>
+              </form>
+
+              {generatedLicenseKey && (
+                <div className="p-4 bg-indigo-50/50 dark:bg-indigo-950/25 border border-indigo-100 dark:border-indigo-900/40 rounded-xl space-y-3 font-sans">
+                  <span className="text-[10px] font-black uppercase text-indigo-700 dark:text-indigo-400 tracking-wider font-mono">Generated Crypt Key</span>
+                  
+                  <div className="flex items-center justify-between bg-white dark:bg-slate-950 p-3 rounded-lg border border-indigo-200/30 dark:border-indigo-800 font-mono text-xs font-black text-indigo-600 dark:text-indigo-400 select-all tracking-wider break-all shadow-inner animate-pulse">
+                    <span>{generatedLicenseKey}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(generatedLicenseKey);
+                        setGenSuccess("Key copied to admin clipboard!");
+                      }}
+                      className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-500 cursor-pointer"
+                      title="Copy Key text"
+                    >
+                      <Copy className="h-4 w-4" />
+                    </button>
+                  </div>
+                  
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEnteredLicenseKey(generatedLicenseKey);
+                      setLicenseError('');
+                      setLicenseSuccess('');
+                      setTimeout(() => {
+                        handleApplyLicense();
+                      }, 50);
+                    }}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-2.5 px-4 rounded-lg text-xs transition-colors cursor-pointer flex items-center justify-center space-x-2 shadow-sm"
+                  >
+                    <Check className="h-4 w-4" />
+                    <span>Instantly Apply Lease Key</span>
+                  </button>
+                </div>
+              )}
+
+              <div className="flex justify-end pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGenAdminEmail('fidelisemus@gmail.com');
+                    setGenAdminPassword('admin123');
+                    if (licenseStatus) {
+                      setGenTargetMonth(licenseStatus.currentMonth);
+                    }
+                  }}
+                  className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 py-1.5 px-3 rounded hover:bg-slate-200 transition-colors font-bold cursor-pointer font-sans"
+                >
+                  🎭 Quick Fill Admin Credentials
+                </button>
+              </div>
+            </div>
+
+            {/* COLUMN 2: ACTIVE STATUS & KEY ACTIVATOR */}
+            <div className="space-y-6 lg:col-span-12 xl:col-span-5 space-y-6">
+              
+              {/* Card 2A: Active License Status details */}
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm space-y-6">
+                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+                  <div className="flex items-center space-x-2">
+                    <Clock className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                    <span className="text-xs font-black text-slate-900 dark:text-white uppercase">Lease Node State</span>
+                  </div>
+                  <span className={`text-[10px] font-mono px-2.5 py-0.5 rounded-full font-black uppercase tracking-wider ${licenseStatus?.isValid ? "bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400" : "bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-400"}`}>
+                    {licenseStatus?.isValid ? "Active ✅" : "Expired ❌"}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border border-slate-100 dark:border-slate-800/80">
+                    <span className="text-[9px] text-slate-400 font-bold block uppercase tracking-wider">Tier Plan</span>
+                    <span className="text-xs text-slate-800 dark:text-white font-extrabold font-sans">
+                      {licenseStatus?.durationCode === "M" ? "Monthly" : 
+                       licenseStatus?.durationCode === "Q" ? "Quarterly (3M)" : 
+                       licenseStatus?.durationCode === "B" ? "Bi-Annually (6M)" : 
+                       licenseStatus?.durationCode === "A" ? "Annually (12M)" : "N/A"}
+                    </span>
+                  </div>
+
+                  <div className="bg-slate-50 dark:bg-slate-955/50 dark:bg-slate-950 p-3 rounded-lg border border-slate-100 dark:border-slate-800/80">
+                    <span className="text-[9px] text-slate-400 font-bold block uppercase tracking-wider block">Remaining life</span>
+                    <span className="text-xs text-slate-800 dark:text-white font-extrabold font-mono text-rose-600 dark:text-rose-400 block">
+                      {licenseStatus && licenseStatus.isValid && licenseStatus.daysRemaining !== null 
+                        ? `${Math.max(0, Math.ceil(licenseStatus.daysRemaining))} Days Left` 
+                        : "No Active Lease"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-2 text-xs leading-normal">
+                  <div className="flex justify-between py-1 border-b border-slate-100 dark:border-slate-800/40 text-[11px]">
+                    <span className="text-slate-500 font-medium">Activation Month:</span>
+                    <span className="text-slate-900 dark:text-white font-bold font-mono">{licenseStatus?.currentMonth || "N/A"}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-100 dark:border-slate-800/40 text-[11px]">
+                    <span className="text-slate-500 font-medium font-sans">Expiration:</span>
+                    <span className="text-slate-900 dark:text-white font-bold font-mono">{licenseStatus?.expiresAt ? licenseStatus.expiresAt.substring(0, 10) : "N/A"}</span>
+                  </div>
+                  <div className="flex justify-between py-1 text-[11px]">
+                    <span className="text-slate-500 font-medium font-sans">Active key:</span>
+                    <span className="text-slate-900 dark:text-white font-bold font-mono truncate max-w-[130px]">{licenseStatus?.activeLicenseKey || "None Applied"}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 2B: Apply Key Field */}
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm space-y-4">
+                <div className="flex items-center space-x-2">
+                  <Lock className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                  <span className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">Apply License Key</span>
+                </div>
+
+                {licenseError && (
+                  <div className="p-3 bg-rose-50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/44 text-rose-700 dark:text-rose-400 rounded-xl text-xs font-semibold">
+                    ⚠️ {licenseError}
+                  </div>
+                )}
+
+                {licenseSuccess && (
+                  <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/44 text-emerald-700 dark:text-emerald-400 rounded-xl text-xs font-semibold animate-pulse">
+                    ✨ {licenseSuccess}
+                  </div>
+                )}
+
+                <form onSubmit={handleApplyLicense} className="space-y-3 font-sans">
+                  <input
+                    type="text"
+                    required
+                    placeholder={`e.g. CG-Q${licenseStatus?.currentMonth?.replace("-", "") || "202606"}-XXXXXXXX`}
+                    className="w-full p-3 font-mono border border-slate-300 dark:border-slate-700 rounded-lg bg-transparent text-xs text-center tracking-widest font-black uppercase focus:ring-1 focus:ring-indigo-600 text-slate-900 dark:text-white"
+                    value={enteredLicenseKey}
+                    onChange={e => setEnteredLicenseKey(e.target.value.toUpperCase())}
+                  />
+
+                  <button
+                    type="submit"
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-2.5 px-4 rounded-xl text-xs transition-colors cursor-pointer shadow-md"
+                  >
+                    Activate License Key
+                  </button>
+                </form>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (licenseStatus && !licenseStatus.isValid) {
+    return (
+      <div className={`min-h-screen ${theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans antialiased flex items-center justify-center p-4 transition-colors duration-200 relative`}>
+        {/* Real-time Theme Toggle Switcher */}
+        <div className="absolute top-4 right-4 z-50">
+          <button
+            onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+            title={theme === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+            className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-800 transition-colors cursor-pointer"
+          >
+            {theme === 'light' ? <Moon className="h-4.5 w-4.5" /> : <Sun className="h-4.5 w-4.5" />}
+          </button>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-lg w-full p-8 space-y-6 text-slate-800 dark:text-slate-100">
+          <div className="text-center space-y-2">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-rose-100 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 shadow-inner">
+              <Lock className="h-6 w-6" />
+            </div>
+            <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">CredGuard System Locked</h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Your software lease has expired for the current calendar month <span className="font-bold font-mono text-rose-600 dark:text-rose-400">{licenseStatus.currentMonth}</span>. Please apply an authorized subscription license key to restore full database access.
+            </p>
+          </div>
+
+          <div className="space-y-4">
+            {licenseError && (
+              <div className="p-3 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/40 text-rose-700 dark:text-rose-400 rounded-lg text-xs font-semibold">
+                ⚠️ {licenseError}
+              </div>
+            )}
+
+            {licenseSuccess && (
+              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/40 text-emerald-700 dark:text-emerald-400 rounded-lg text-xs font-semibold animate-pulse">
+                ✨ {licenseSuccess}
+              </div>
+            )}
+
+            <form onSubmit={handleApplyLicense} className="space-y-4 font-sans">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">Subscription License Key</label>
+                <input
+                  type="text"
+                  required
+                  placeholder={`e.g. CG-${licenseStatus.currentMonth.replace("-", "")}-XXXXXXXX`}
+                  className="w-full p-3 font-mono border border-slate-300 dark:border-slate-700 rounded-lg bg-transparent text-xs text-center tracking-widest font-black uppercase focus:ring-2 focus:ring-indigo-600 text-indigo-600 dark:text-indigo-400 text-slate-900 dark:text-white"
+                  value={enteredLicenseKey}
+                  onChange={e => setEnteredLicenseKey(e.target.value.toUpperCase())}
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-lg text-xs transition-colors cursor-pointer shadow-md shadow-indigo-600/10 flex items-center justify-center space-x-2"
+              >
+                <Shield className="h-4 w-4" />
+                <span>Activate License Lease</span>
+              </button>
+            </form>
+
+            <div className="pt-4 border-t border-slate-100 dark:border-slate-800 text-center space-y-3">
+              {VITE_APP_MODE === 'app' ? (
+                VITE_ADMIN_PORTAL_URL ? (
+                  <a
+                    href={VITE_ADMIN_PORTAL_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center space-x-2 text-xs font-black text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer font-sans"
+                  >
+                    <Shield className="h-4 w-4" />
+                    <span>Go to Dedicated License Administration &rarr;</span>
+                  </a>
+                ) : (
+                  <div className="p-3 bg-slate-50 dark:bg-slate-950/40 rounded-xl border border-slate-100 dark:border-slate-800/80 text-left font-sans text-[10px] text-slate-500 space-y-1">
+                    <span className="font-bold text-slate-700 dark:text-slate-300 block">🔑 Isolated Admin Portal Hosted Separately</span>
+                    <p>Activate licenses locally using the form above. Set the <code className="bg-slate-100 dark:bg-slate-900 px-1 rounded text-red-500 font-bold">VITE_ADMIN_PORTAL_URL</code> environment variable to link your standalone administrator portal.</p>
+                  </div>
+                )
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAdminGate(!showAdminGate);
+                      setAdminGateError('');
+                      setAdminGatePassword('');
+                    }}
+                    className="inline-flex items-center space-x-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors cursor-pointer"
+                  >
+                    <Lock className="h-3.5 w-3.5" />
+                    <span>{showAdminGate ? "Hide Admin Gateway" : "Systems Admin Gateway"}</span>
+                  </button>
+
+                  {showAdminGate && (
+                    <div className="bg-slate-50 dark:bg-slate-950/50 p-4 rounded-xl border border-slate-200/50 dark:border-slate-800/80 space-y-3 text-left animate-fadeIn">
+                      <span className="text-[10px] font-black uppercase text-indigo-600 dark:text-indigo-400 tracking-wider block font-mono">Restricted Administration Access</span>
+                      <div className="space-y-2">
+                        <input
+                          type="password"
+                          placeholder="Enter Authority Password"
+                          className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 text-xs text-center focus:ring-1 focus:ring-indigo-600 focus:border-indigo-600 text-slate-900 dark:text-white font-semibold"
+                          value={adminGatePassword}
+                          onChange={e => {
+                            setAdminGatePassword(e.target.value);
+                            setAdminGateError('');
+                          }}
+                        />
+                        {adminGateError && (
+                          <p className="text-[10px] font-bold text-rose-600 dark:text-rose-450 text-center">❌ {adminGateError}</p>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (adminGatePassword === 'admin123') {
+                              setIsAdminVerified(true);
+                              setAdminGateError('');
+                              navigateTo('/license-admin');
+                            } else {
+                              setAdminGateError('Invalid Authority Password');
+                            }
+                          }}
+                          className="w-full bg-slate-900 hover:bg-black dark:bg-indigo-600 dark:hover:bg-indigo-700 text-white font-bold py-2 px-3 rounded-lg text-xs transition-colors cursor-pointer text-center"
+                        >
+                          Authenticate Admin Console
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className="bg-slate-50 dark:bg-slate-950/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800/80 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400 space-y-1 font-sans">
+              <span className="font-bold text-slate-700 dark:text-slate-300 block mb-1">🔑 Subscription Licensing Rules</span>
+              <p>• Licenses can be activated for Monthly, Quarterly, Bi-Annually, or Annually subscription terms.</p>
+              <p>• The current host month demands a key matching: <span className="font-mono text-xs text-indigo-600 dark:text-indigo-400">{licenseStatus.requiredFormat}</span></p>
+              <p>• To generate new subscription keys, sign in to the separate Admin Portal.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!currentUser) {
     return (
       <div className={`min-h-screen ${theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans antialiased flex items-center justify-center p-4 transition-colors duration-200 relative`}>
@@ -1133,6 +1881,39 @@ export default function App() {
                       <span className="text-slate-400">Agent Interface:</span>
                       <span className="text-slate-600 dark:text-slate-400 truncate max-w-[140px]">{currentUser.clientApp}</span>
                     </div>
+                    <div className="flex justify-between items-center text-[10px]">
+                      <span className="text-slate-400">License Lease:</span>
+                      <span className="font-mono text-emerald-600 dark:text-emerald-400 font-bold uppercase">
+                        {licenseStatus?.isValid ? "Active ✅" : "Expired ❌"}
+                      </span>
+                    </div>
+                    {currentUser?.role === 'Operator' && (
+                      <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1">
+                        <button
+                          onClick={() => {
+                            setShowProfileMenu(false);
+                            if (licenseStatus) {
+                              setGenTargetMonth(licenseStatus.currentMonth);
+                            }
+                            setShowRenewalModal(true);
+                          }}
+                          className="w-full text-center text-[9px] text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 py-1 rounded transition-colors font-bold flex items-center justify-center space-x-1 cursor-pointer"
+                        >
+                          <Shield className="h-3 w-3" />
+                          <span>Subscription Portal</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setShowProfileMenu(false);
+                            setLicenseStatus(prev => prev ? { ...prev, isValid: false } : null);
+                          }}
+                          className="w-full text-center text-[9px] text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/20 py-1 rounded transition-colors font-bold flex items-center justify-center space-x-1 cursor-pointer"
+                        >
+                          <Lock className="h-3 w-3" />
+                          <span>Simulate System Lock</span>
+                        </button>
+                      </div>
+                    )}
                     {currentUser.token && (
                       <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
                         <span className="text-[9px] text-slate-400 font-bold block uppercase tracking-wider mb-1">JWT Session Token</span>
@@ -1196,6 +1977,45 @@ export default function App() {
 
       {/* Main Container */}
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
+        
+        {/* Dynamic License Subscriptions Warning banner */}
+        {licenseStatus && licenseStatus.isValid && licenseStatus.daysRemaining !== null && licenseStatus.daysRemaining <= 7 && (
+          <div id="license-warning-bar" className="mb-6 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-gradient-to-r from-rose-50 to-amber-50 dark:from-rose-950/20 dark:to-slate-900 p-5 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-rose-100 dark:bg-rose-950/80 text-rose-600 dark:text-rose-400">
+                  <AlertTriangle className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5">
+                    <span>CredGuard Lease Expiration Notice</span>
+                    <span className="text-[10px] bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-400 px-2 py-0.5 rounded font-mono font-black uppercase shrink-0">
+                      {licenseStatus.durationCode === "M" ? "Monthly" : 
+                       licenseStatus.durationCode === "Q" ? "Quarterly" : 
+                       licenseStatus.durationCode === "B" ? "Bi-Annually" : 
+                       licenseStatus.durationCode === "A" ? "Annually" : "Active"} Plan
+                    </span>
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-400 leading-normal">
+                    Your software subscription security lease is scheduled to expire in <span className="font-extrabold text-rose-600 dark:text-rose-400 font-mono">{Math.max(0, Math.ceil(licenseStatus.daysRemaining))} days</span> (on {licenseStatus.expiresAt ? licenseStatus.expiresAt.substring(0, 10) : 'N/A'}). Please renew your subscription to prevent database lockups.
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => {
+                  if (licenseStatus) {
+                    setGenTargetMonth(licenseStatus.currentMonth);
+                  }
+                  setShowRenewalModal(true);
+                }}
+                className="self-start sm:self-center inline-flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold py-2 px-4 rounded-lg transition-colors cursor-pointer shadow-md shadow-rose-600/10 shrink-0"
+              >
+                <Shield className="h-3.5 w-3.5" />
+                <span>Renew / Apply License Key</span>
+              </button>
+            </div>
+          </div>
+        )}
         
         {/* Compliance Guard & Integration Banner */}
         {showConsentWarning && (
@@ -4231,6 +5051,115 @@ export default function App() {
                 </div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Dynamic Licensing Renewal & Application Portal Modal */}
+      {showRenewalModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-lg w-full p-8 space-y-6 text-slate-800 dark:text-slate-100 relative">
+            
+            {/* Close button */}
+            <button 
+              onClick={() => {
+                setShowRenewalModal(false);
+                setLicenseError('');
+                setLicenseSuccess('');
+                setGenError('');
+                setGenSuccess('');
+              }}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full p-1.5 transition-colors cursor-pointer"
+            >
+              <span className="font-sans text-lg font-bold block px-2 leading-none">×</span>
+            </button>
+
+            <div className="text-center space-y-2">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 shadow-inner">
+                <Shield className="h-6 w-6" />
+              </div>
+              <h3 className="text-xl font-black tracking-tight text-slate-900 dark:text-white">Subscription Licensing Portal</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Renew your CredGuard system lease with a dynamic duration plan (Monthly, Quarterly, Bi-Annually, or Annually).
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              {licenseError && (
+                <div className="p-3 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/40 text-rose-700 dark:text-rose-400 rounded-lg text-xs font-semibold">
+                  ⚠️ {licenseError}
+                </div>
+              )}
+
+              {licenseSuccess && (
+                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-950/30 text-emerald-700 dark:text-emerald-400 rounded-lg text-xs font-semibold">
+                  ✨ {licenseSuccess}
+                </div>
+              )}
+
+              <form onSubmit={handleApplyLicense} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">Subscription License Key</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder={`e.g. CG-Q${licenseStatus?.currentMonth?.replace("-", "") || "202606"}-XXXXXXXX`}
+                    className="w-full p-3 font-mono border border-slate-300 dark:border-slate-700 rounded-lg bg-transparent text-xs text-center tracking-widest font-black uppercase focus:ring-2 focus:ring-indigo-600 text-indigo-600 dark:text-indigo-400 text-slate-900 dark:text-white"
+                    value={enteredLicenseKey}
+                    onChange={e => setEnteredLicenseKey(e.target.value.toUpperCase())}
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-lg text-xs transition-colors cursor-pointer shadow-md shadow-indigo-600/10 flex items-center justify-center space-x-2"
+                >
+                  <ShieldCheckIcon className="h-4 w-4" />
+                  <span>Activate License Lease</span>
+                </button>
+              </form>
+
+              {currentUser?.role === 'Operator' && (
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-center">
+                  {VITE_APP_MODE === 'app' ? (
+                    VITE_ADMIN_PORTAL_URL ? (
+                      <a
+                        href={VITE_ADMIN_PORTAL_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={() => setShowRenewalModal(false)}
+                        className="inline-flex items-center space-x-2 text-xs font-black text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer font-sans"
+                      >
+                        <Shield className="h-4 w-4" />
+                        <span>Open Separate License Admin Portal &rarr;</span>
+                      </a>
+                    ) : (
+                      <span className="text-[10px] text-slate-500 font-medium">
+                        🔑 Admin Gateway is hosted at a separate URL.
+                      </span>
+                    )
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowRenewalModal(false);
+                        navigateTo('/license-admin');
+                      }}
+                      className="inline-flex items-center space-x-2 text-xs font-black text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer font-sans"
+                    >
+                      <Shield className="h-4 w-4" />
+                      <span>Open Separate License Admin Portal &rarr;</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
+              <div className="bg-slate-50 dark:bg-slate-950/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800/80 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400 space-y-1 font-sans text-left">
+                <span className="font-bold text-slate-700 dark:text-slate-300 block mb-1">🔑 Subscription Licensing Rules</span>
+                <p>• Licenses can be activated for Monthly, Quarterly, Bi-Annually, or Annually subscription terms.</p>
+                <p>• To generate new subscription keys, sign in to the separate Admin Portal.</p>
+              </div>
+            </div>
           </div>
         </div>
       )}
