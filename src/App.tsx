@@ -46,7 +46,13 @@ import {
   Trash2,
   Edit3,
   Terminal,
-  Table
+  Table,
+  FileText,
+  HelpCircle,
+  Globe,
+  Activity,
+  Code,
+  CheckCircle2
 } from 'lucide-react';
 import { Borrower, Loan, Payment, UserSession, RiskAlert, RecoveryCase, NotificationLog, GeoLocation } from './types';
 import { SDK_TEMPLATES } from './utils/sdkTemplates';
@@ -58,6 +64,29 @@ const VITE_ADMIN_PORTAL_URL = ((import.meta as any).env?.VITE_ADMIN_PORTAL_URL |
 export default function App() {
   // Navigation Tabs
   const [activeTab, setActiveTab ] = useState<'analytics' | 'borrowers' | 'loans' | 'recovery' | 'audits' | 'sdks' | 'database'>('analytics');
+
+  // Subdomain Portal Simulation Selector
+  const [selectedDomain, setSelectedDomain] = useState<'app.credguard.com' | 'admin.credguard.com'>('app.credguard.com');
+  const [simulatedIp, setSimulatedIp] = useState<string>('198.162.24.11'); // Default whitelisted HQ IP
+  const [adminMfaCode, setAdminMfaCode] = useState<string>('');
+  const [isMfaPassed, setIsMfaPassed] = useState<boolean>(false);
+  const [adminCredentialEmail, setAdminCredentialEmail] = useState<string>('fidelisemus@gmail.com');
+  const [adminCredentialPassword, setAdminCredentialPassword] = useState<string>('admin123');
+  const [adminLoginStep, setAdminLoginStep] = useState<'creds' | 'mfa'>('creds');
+  const [adminAuthError, setAdminAuthError] = useState<string>('');
+  const [simulatedMfaOtp, setSimulatedMfaOtp] = useState<string>('518420');
+  const [selectedAdminSubTab, setSelectedAdminSubTab] = useState<'generators' | 'tenants' | 'billing' | 'usage' | 'health' | 'audits' | 'vault' | 'architect'>('generators');
+  const [lastAuditLogs, setLastAuditLogs] = useState<Array<{ timestamp: string; action: string; details: string; operator: string; status: 'SUCCESS' | 'WARN' | 'BLOCKED' | 'PENDING' }>>([
+    { timestamp: new Date().toISOString().substring(0, 16), action: 'System Provisioned', details: 'Client app.credguard.com and central admin.credguard.com initial handshake secure.', operator: 'SYSTEM', status: 'SUCCESS' },
+    { timestamp: new Date().toISOString().substring(0, 16), action: 'MFA Enabled', details: 'Enforced Google Authenticator synchronizer for superfidelis operators.', operator: 'fidelisemus@gmail.com', status: 'SUCCESS' },
+    { timestamp: new Date().toISOString().substring(0, 16), action: 'IP Whitelisted', details: 'Added 198.162.24.11 (HQ Node Cluster) to Firewall Whitelist.', operator: 'SYSTEM', status: 'SUCCESS' },
+  ]);
+  const [activeApiKeys, setActiveApiKeys] = useState({
+    sandboxKey: 'cg_test_8f237f81a7b949219b6e838ce10574af',
+    sandboxCalls: 1284,
+    liveKey: 'cg_live_f3928a39e8a829871cc2901ee4ea3922',
+    liveCalls: 457890
+  });
 
   // Backend state stores
   const [borrowers, setBorrowers] = useState<Borrower[]>([]);
@@ -169,16 +198,16 @@ export default function App() {
   // CREDGUARD MONTHLY LICENSING LOGIC & ACTIVATION STATES
   // -------------------------------------------------------------
   const [currentPath, setCurrentPath] = useState(() => {
-    if (VITE_APP_MODE === 'admin') {
-      return '/license-admin';
+    if (VITE_APP_MODE === 'admin' || window.location.pathname === '/admin') {
+      return '/admin';
     }
     return window.location.pathname;
   });
 
   useEffect(() => {
     const handlePopState = () => {
-      if (VITE_APP_MODE === 'admin') {
-        setCurrentPath('/license-admin');
+      if (VITE_APP_MODE === 'admin' || window.location.pathname === '/admin') {
+        setCurrentPath('/admin');
       } else {
         setCurrentPath(window.location.pathname);
       }
@@ -189,11 +218,11 @@ export default function App() {
 
   const navigateTo = (path: string) => {
     if (VITE_APP_MODE === 'admin') {
-      window.history.pushState(null, '', '/license-admin');
-      setCurrentPath('/license-admin');
+      window.history.pushState(null, '', '/admin');
+      setCurrentPath('/admin');
       return;
     }
-    if (path === '/license-admin' && VITE_APP_MODE === 'app') {
+    if (path === '/admin' && VITE_APP_MODE === 'app') {
       if (VITE_ADMIN_PORTAL_URL) {
         window.open(VITE_ADMIN_PORTAL_URL, '_blank', 'noopener,noreferrer');
         return;
@@ -231,6 +260,52 @@ export default function App() {
   const [showAdminGate, setShowAdminGate] = useState(false);
   const [adminGatePassword, setAdminGatePassword] = useState('');
   const [adminGateError, setAdminGateError] = useState('');
+
+  // Developer Portal & API documentation states
+  const [sdkSubTab, setSdkSubTab] = useState<'sdks' | 'api_ref' | 'docs_portal'>('docs_portal');
+  const [docsActiveSec, setDocsActiveSec] = useState<string>('overview');
+  const [selectedEndpointId, setSelectedEndpointId] = useState<string>('track_session');
+  const [developerKeys, setDeveloperKeys] = useState<{
+    sandboxKey: string;
+    sandboxCreated: string;
+    sandboxCalls: number;
+    liveKey: string;
+    liveCreated: string;
+    liveCalls: number;
+  } | null>(null);
+  const [isRotatingKey, setIsRotatingKey] = useState<string | null>(null);
+  const [selectedAuthKeyType, setSelectedAuthKeyType] = useState<'sandbox' | 'live' | 'license'>('sandbox');
+
+  const fetchDeveloperKeys = async () => {
+    try {
+      const res = await fetch('/api/developer/keys');
+      if (res.ok) {
+        const data = await res.json();
+        setDeveloperKeys(data);
+      }
+    } catch (err) {
+      console.error('Failed to load developer keys:', err);
+    }
+  };
+
+  const handleRotateKey = async (type: 'sandbox' | 'live') => {
+    setIsRotatingKey(type);
+    try {
+      const res = await fetch('/api/developer/keys/rotate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDeveloperKeys(data.keys);
+      }
+    } catch (err) {
+      console.error('Failed to rotate developer key:', err);
+    } finally {
+      setIsRotatingKey(null);
+    }
+  };
 
   const fetchLicenseStatus = async () => {
     setIsLicenseChecking(true);
@@ -319,6 +394,7 @@ export default function App() {
 
   useEffect(() => {
     fetchLicenseStatus();
+    fetchDeveloperKeys();
   }, []);
 
   useEffect(() => {
@@ -1058,50 +1134,1315 @@ export default function App() {
     );
   }
 
-  if (currentPath === '/license-admin' && VITE_APP_MODE === 'app') {
+  // --- PORTAL B: SYSTEMS ADMIN GATEWAY HELPER COMPONENTS ---
+  const renderSimulationBar = () => {
     return (
-      <div className={`min-h-screen ${theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans antialiased flex items-center justify-center p-4 transition-colors duration-200`}>
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-8 space-y-6 text-slate-800 dark:text-slate-100 text-center">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-650 dark:text-indigo-400 shadow-inner">
-            <Lock className="h-6 w-6" />
+      <div className="bg-slate-900 border-b border-slate-950 px-4 py-2 flex.wrap items-center justify-between text-xs gap-3 flex">
+        <div className="flex items-center gap-2">
+          <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></div>
+          <span className="font-mono text-slate-400">DNS Proxy Simulator:</span>
+          <select
+            value={selectedDomain}
+            onChange={(e) => {
+              setSelectedDomain(e.target.value as any);
+              navigateTo('/');
+            }}
+            className="bg-slate-950 border border-slate-800 text-[11px] font-mono text-emerald-400 font-bold px-2 py-0.5 rounded cursor-pointer outline-none focus:border-emerald-500"
+          >
+            <option value="app.credguard.com">app.credguard.com (Client Portal)</option>
+            <option value="admin.credguard.com">admin.credguard.com (Systems Admin Gateway)</option>
+          </select>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-slate-400 text-[11px]">Simulated Connection IP:</span>
+            <input
+              type="text"
+              value={simulatedIp}
+              onChange={(e) => setSimulatedIp(e.target.value)}
+              className="w-28 bg-slate-950 border border-slate-800 text-[11px] font-mono text-indigo-400 px-1.5 py-0.5 rounded text-center outline-none focus:border-indigo-500"
+              placeholder="e.g. 192.168.1.1"
+            />
+            {simulatedIp === '198.162.24.11' ? (
+              <span className="text-[9px] bg-emerald-950 border border-emerald-900/55 text-emerald-400 px-1.5 py-0.5 rounded uppercase font-bold tracking-wider font-mono">Whitelisted</span>
+            ) : (
+              <span className="text-[9px] bg-rose-950 border border-rose-900/55 text-rose-450 px-1.5 py-0.5 rounded uppercase font-bold tracking-wider font-mono">Blocked</span>
+            )}
           </div>
-          <div className="space-y-2">
-            <h1 className="text-xl font-black tracking-tight text-slate-900 dark:text-white uppercase font-sans">Separate Portal Required</h1>
-            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-              This environment runs the isolated **Loan Recovery System**. To preserve structural isolation of license administration credentials, the central generator is hosted on its own standalone URL.
+        </div>
+      </div>
+    );
+  };
+
+  const renderInjectedDatabaseComponents = () => {
+    const runSimulatedSql = () => {
+      setSqlError('');
+      setSqlResult(null);
+      try {
+        const query = sqlQuery.toLowerCase().trim();
+        if (query.startsWith('select * from borrowers')) {
+          setSqlResult({
+            query: sqlQuery,
+            rowCount: borrowers.length,
+            rows: borrowers
+          });
+        } else if (query.startsWith('select * from loans')) {
+          setSqlResult({
+            query: sqlQuery,
+            rowCount: loans.length,
+            rows: loans
+          });
+        } else if (query.startsWith('select * from payments')) {
+          setSqlResult({
+            query: sqlQuery,
+            rowCount: payments.length,
+            rows: payments
+          });
+        } else if (query.startsWith('select * from cases') || query.startsWith('select * from recovery_cases') || query.startsWith('select * from recovery')) {
+          setSqlResult({
+            query: sqlQuery,
+            rowCount: cases.length,
+            rows: cases
+          });
+        } else if (query.startsWith('select * from audit_trail') || query.startsWith('select * from logs')) {
+          setSqlResult({
+            query: sqlQuery,
+            rowCount: lastAuditLogs.length,
+            rows: lastAuditLogs
+          });
+        } else {
+          setSqlResult({
+            query: sqlQuery,
+            rowCount: borrowers.length,
+            rows: borrowers.slice(0, 5)
+          });
+        }
+      } catch (e: any) {
+        setSqlError(e.message || 'SQLite Syntax Error');
+      }
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="lg:col-span-5 bg-white dark:bg-slate-900 border border-slate-205 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-4">
+            <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider font-mono">SQLite Workstation Command</h3>
+            <div className="space-y-2">
+              <textarea
+                value={sqlQuery}
+                onChange={(e) => setSqlQuery(e.target.value)}
+                className="w-full h-32 p-3 font-mono text-[11px] border border-slate-300 dark:border-slate-705 rounded-xl bg-slate-950 text-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500 shadow-inner"
+              />
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-[10px] text-slate-400 font-mono">Database: in-memory sqlite_client_host</span>
+                <button
+                  type="button"
+                  onClick={runSimulatedSql}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs py-1.5 px-4 rounded-lg flex items-center gap-1.5 cursor-pointer shadow transition-colors"
+                >
+                  <Terminal className="h-3.5 w-3.5" />
+                  Run SQL Query
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="lg:col-span-7 bg-white dark:bg-slate-900 border border-slate-205 dark:border-slate-800 rounded-2xl p-6 shadow-sm">
+            <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider font-mono mb-4">Master Table Schema Indexes</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {[
+                { name: 'borrowers', count: borrowers.length, desc: 'Enterprise Borrower Files & KYC' },
+                { name: 'loans', count: loans.length, desc: 'Central Loan Agreement Ledgers' },
+                { name: 'payments', count: payments.length, desc: 'Historical Payments Tranches' },
+                { name: 'recovery_cases', count: cases.length, desc: 'Delinquent Recovery Incidents' },
+                { name: 'alerts', count: alerts.length, desc: 'Risk Risk signals queue' },
+                { name: 'audit_trail', count: lastAuditLogs.length, desc: 'Immutable Admin Security Audits' }
+              ].map((tb) => (
+                <button
+                  key={tb.name}
+                  type="button"
+                  onClick={() => {
+                    setSqlQuery(`SELECT * FROM ${tb.name}`);
+                    setTimeout(() => runSimulatedSql(), 20);
+                  }}
+                  className="p-3 bg-slate-50 dark:bg-slate-950 border border-slate-150 dark:border-slate-800 rounded-xl hover:border-indigo-500 transition-all text-left group cursor-pointer"
+                >
+                  <div className="flex justify-between items-center">
+                    <span className="font-mono text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-indigo-400">{tb.name}</span>
+                    <span className="text-[9px] bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded font-black font-mono text-slate-650 dark:text-slate-400">{tb.count} rows</span>
+                  </div>
+                  <p className="text-[10px] text-slate-405 mt-1 leading-tight">{tb.desc}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {sqlError && (
+          <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 dark:bg-rose-955/20 dark:border-rose-900 dark:text-rose-455 rounded-lg text-xs font-bold font-mono">
+            ⚠️ {sqlError}
+          </div>
+        )}
+
+        {sqlResult && (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-4 animate-fadeIn">
+            <div className="flex justify-between items-center border-b border-slate-150 dark:border-slate-800 pb-3 font-sans">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                <span className="font-mono text-xs font-black uppercase text-slate-900 dark:text-white">SQLite Result Terminal</span>
+              </div>
+              <span className="font-mono text-[10px] text-slate-450">{sqlResult.rowCount} records returned</span>
+            </div>
+
+            <div className="overflow-x-auto max-h-[300px] border border-slate-100 dark:border-slate-800 rounded-xl">
+              {sqlResult.rows.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-400 font-mono">
+                  QueryResult: emptyset (0 rows)
+                </div>
+              ) : (
+                <table className="w-full text-left border-collapse font-mono text-[10.5px]">
+                  <thead>
+                    <tr className="bg-slate-50 dark:bg-slate-950 text-slate-400 border-b border-slate-150 dark:border-slate-800 font-bold">
+                      {Object.keys(sqlResult.rows[0] || {}).map((col) => (
+                        <th key={col} className="p-2.5 truncate font-bold text-slate-700 dark:text-slate-300">{col}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-650 dark:text-slate-350">
+                    {sqlResult.rows.map((row: any, rIdx: number) => (
+                      <tr key={rIdx} className="hover:bg-slate-50 dark:hover:bg-slate-808">
+                        {Object.values(row).map((val: any, vIdx) => (
+                          <td key={vIdx} className="p-2.5 max-w-[150px] truncate select-all font-mono text-slate-600 dark:text-slate-400">
+                            {typeof val === 'object' ? JSON.stringify(val) : String(val)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderArchitectureStudioView = () => {
+    return (
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-fadeIn font-sans text-xs">
+        <div className="lg:col-span-8 bg-white dark:bg-slate-900 border border-slate-205 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-6">
+          <div className="border-b border-slate-100 dark:border-slate-800 pb-4">
+            <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight font-sans flex items-center gap-2">
+              <Terminal className="h-5 w-5 text-rose-600 animate-pulse" />
+              PORTALS DECOUPLED SYSTEMS METRIC MAP
+            </h3>
+            <p className="text-[11.5px] text-slate-500 dark:text-slate-400 leading-normal mt-1">
+              Active map outlining absolute separation of Client Operations (Portal A) from Central Leases & Sharding Administration (Portal B).
             </p>
           </div>
 
-          <div className="space-y-3 pt-2">
-            {VITE_ADMIN_PORTAL_URL ? (
-              <a
-                href={VITE_ADMIN_PORTAL_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg text-xs transition-colors cursor-pointer shadow-md shadow-indigo-600/10 flex items-center justify-center space-x-2"
+          <div className="bg-slate-950 text-slate-300 p-6 rounded-2xl font-mono text-[10.5px] border border-slate-800 space-y-4 shadow-inner">
+            <div className="flex justify-between items-center text-[10px] uppercase font-bold text-slate-500 border-b border-slate-800 pb-2">
+              <span>Traffic Ingress Controller</span>
+              <span className="text-rose-500 font-bold">Separation Layer Active</span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center text-center">
+              <div className="p-3 bg-indigo-950/40 border border-indigo-900/60 rounded-xl space-y-1">
+                <span className="text-indigo-400 font-extrabold text-[12px] block">Portal A: Client Domain</span>
+                <span className="text-slate-400 text-[9px] block bg-slate-950 p-1 rounded">VITE_APP_MODE = "app"</span>
+                <span className="text-slate-505 text-[10px] block">Hosts Borrower Sync, Portfolio, Geofencing, recovery monitoring</span>
+              </div>
+
+              <div className="text-[16px] text-rose-505 font-bold p-2 font-black rotate-90 md:rotate-0">&harr; DNS Firewall &harr;</div>
+
+              <div className="p-3 bg-rose-950/30 border border-rose-900/50 rounded-xl space-y-1">
+                <span className="text-rose-400 font-extrabold text-[12px] block">Portal B: Systems admin Gateway</span>
+                <span className="text-slate-400 text-[9px] block bg-slate-950 p-1 rounded">VITE_APP_MODE = "admin"</span>
+                <span className="text-rose-455 text-[10px] block">Hosts Leases compiler, Tenant provisioner, SQL Workstation, Secrets Rotation</span>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-slate-950 border border-slate-850 rounded-xl text-[11px] leading-relaxed space-y-1 font-sans text-slate-400">
+              <span className="font-black text-white font-mono uppercase tracking-wider text-[10px] block">Decoupling Strategy Implementation</span>
+              <p>1. **IP Range Restrictions:** Firewall whitelist limits Administrator logins strictly to source IP <code className="text-indigo-400 font-mono bg-slate-900 px-1 py-0.5 rounded font-black">198.162.24.11</code>.</p>
+              <p>2. **Independent Secrets Vault:** Client database arrays carry absolutely no license signature generation keys. Leasing signature blocks are strictly decoupled server-side.</p>
+              <p>3. **Tenant Sharding Schemas:** Bank entities mapped in the registry run on completely sharded, distinct SQLite databases to enforce zero-cross-tenant leakage breaches.</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="lg:col-span-4 bg-white dark:bg-slate-900 border border-slate-205 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-6">
+          <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider font-mono">Sovereign Authority Matrix Matrix</h3>
+
+          <div className="divide-y divide-slate-100 dark:divide-slate-800 font-sans text-xs">
+            <div className="pb-3.5 space-y-1">
+              <div className="flex justify-between font-bold text-xs">
+                <span className="text-slate-900 dark:text-white font-extrabold">Principal Admin Master</span>
+                <span className="text-indigo-650 dark:text-indigo-400">fidelisemus@gmail.com</span>
+              </div>
+              <p className="text-slate-500 leading-normal text-[11px]">Compiles signed Monthly Licenses, Provisions Bank Tenants, rotates API secret vaults, and runs unrestricted SQL Terminal commands.</p>
+            </div>
+
+            <div className="py-3.5 space-y-1">
+              <div className="flex justify-between font-bold text-xs">
+                <span className="text-slate-900 dark:text-white font-extrabold">B2B Financial Exec</span>
+                <span className="text-slate-500">Corporate Portal</span>
+              </div>
+              <p className="text-slate-500 leading-normal text-[11px]">Sits in Client Portal (Portal A) to manage Loans, analyze Borrower Risk parameters, query geolocation traces, and approve payment plans.</p>
+            </div>
+
+            <div className="py-3.5 space-y-1">
+              <div className="flex justify-between font-bold text-xs">
+                <span className="text-slate-900 dark:text-white font-extrabold">API Agent Integration</span>
+                <span className="text-slate-505">Client Dev Console</span>
+              </div>
+              <p className="text-slate-500 leading-normal text-[11px]">Integrates third-party loan systems securely using API sandbox or production keys signatures.</p>
+            </div>
+          </div>
+
+          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-850 font-mono text-[10.5px]">
+            <span className="font-extrabold text-[10px] text-slate-550 block mb-1">MFA PARAMETERS</span>
+            <p className="text-slate-600 dark:text-slate-400">Dynamic Google Auth TOTP verification synchronized using RFC 6238 time coefficients.</p>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderSystemsAdminPortal = () => {
+    // 1. IP Whitelisting Gate Check
+    if (simulatedIp !== '198.162.24.11') {
+      return (
+        <div className={`min-h-screen ${theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans antialiased flex flex-col transition-colors duration-200`}>
+          {renderSimulationBar()}
+          <div className="flex-1 flex items-center justify-center p-6 bg-slate-950/20">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-rose-200 dark:border-rose-900/60 shadow-2xl max-w-lg w-full p-8 text-center space-y-6">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-50 dark:bg-rose-950/50 text-rose-600 shadow-inner">
+                <AlertTriangle className="h-7 w-7 animate-bounce" />
+              </div>
+              <div className="space-y-2">
+                <h1 className="text-base font-black tracking-tight text-slate-900 dark:text-white uppercase font-sans">FIREWALL EXCEPTION DETAILS</h1>
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-sans">
+                  The admin portal at <span className="font-bold text-slate-950 dark:text-white">admin.credguard.com</span> actively restricts operations to whitelisted infrastructure IP nodes.
+                </p>
+                <div className="p-4 bg-slate-50 dark:bg-slate-950 rounded-xl border border-rose-200 dark:border-rose-850 text-[11px] font-mono text-left space-y-2">
+                  <div className="flex justify-between border-b border-slate-150 dark:border-slate-800 pb-1.5 text-[9px] uppercase font-bold text-slate-450">
+                    <span>Firewall Directive</span>
+                    <span className="text-rose-500 font-extrabold font-bold">BLOCKED</span>
+                  </div>
+                  <p className="text-slate-600 dark:text-slate-400"><span className="text-rose-500 font-bold">Unrecognized Source IP:</span> <span className="font-black text-slate-900 dark:text-white">{simulatedIp}</span></p>
+                  <p className="text-slate-600 dark:text-slate-400"><span className="text-emerald-500 font-bold">Allowed Whitelist IP:</span> 198.162.24.11</p>
+                  <p className="text-indigo-650 dark:text-indigo-400 leading-relaxed"><span className="font-bold">Bypass:</span> Modify simulated IP above to <span className="underline font-extrabold">198.162.24.11</span> using the simulated connection proxy banner.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // 2. Credentials Verification Check
+    if (!isMfaPassed) {
+      if (adminLoginStep === 'creds') {
+        return (
+          <div className={`min-h-screen ${theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans antialiased flex flex-col transition-colors duration-200`}>
+            {renderSimulationBar()}
+            <div className="flex-1 flex items-center justify-center p-6">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-8 space-y-6 animate-fadeIn">
+                <div className="text-center space-y-2">
+                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 shadow-inner">
+                    <Shield className="h-6 w-6 text-indigo-650" />
+                  </div>
+                  <h1 className="text-lg font-black tracking-tight text-slate-900 dark:text-white uppercase font-sans">Authority Ingress check</h1>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-sans max-w-sm mx-auto leading-normal">
+                    This administrative suite is strictly decoupled. Identity validation is mandated before system handshakes are allowed.
+                  </p>
+                </div>
+
+                {adminAuthError && (
+                  <div className="p-3 bg-rose-50 border border-rose-250 text-rose-750 dark:bg-rose-955/20 dark:border-rose-900 dark:text-rose-400 rounded-lg text-xs font-bold text-center">
+                    ⚠️ {adminAuthError}
+                  </div>
+                )}
+
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  setAdminAuthError('');
+                  if (adminCredentialEmail === 'fidelisemus@gmail.com' && adminCredentialPassword === 'admin123') {
+                    setAdminLoginStep('mfa');
+                    setLastAuditLogs(p => [
+                      { timestamp: new Date().toISOString().substring(0, 16), action: 'Auth Step 1 Verified', details: 'Core passwords matched. Dynamic MFA TOTP sync required.', operator: 'fidelisemus@gmail.com', status: 'PENDING' },
+                      ...p
+                    ]);
+                  } else {
+                    setAdminAuthError('Invalid administrator credentials.');
+                  }
+                }} className="space-y-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black uppercase text-slate-600 dark:text-slate-400 block tracking-wider">Super User ID email</label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="super@credguard.com"
+                      className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-transparent text-xs font-semibold text-slate-900 dark:text-white"
+                      value={adminCredentialEmail}
+                      onChange={e => setAdminCredentialEmail(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black uppercase text-slate-600 dark:text-slate-400 block tracking-wider">Access Security Password</label>
+                    <input
+                      type="password"
+                      required
+                      placeholder="••••••••"
+                      className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-transparent text-xs font-semibold text-slate-900 dark:text-white tracking-widest text-center"
+                      value={adminCredentialPassword}
+                      onChange={e => setAdminCredentialPassword(e.target.value)}
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full bg-rose-600 hover:bg-rose-700 text-white font-extrabold py-2.5 px-4 rounded-lg text-xs transition-colors cursor-pointer shadow-md shadow-rose-600/10 flex items-center justify-center space-x-2"
+                  >
+                    <Lock className="h-4 w-4" />
+                    <span>Authorize Identity &rarr;</span>
+                  </button>
+                </form>
+
+                <div className="p-3 bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-150 rounded-xl text-center text-[10px] text-indigo-950 dark:text-indigo-400">
+                  💡 <span className="font-extrabold">Notice to Engineer:</span> Correct prefilled authority credentials are: <span className="font-mono text-[10.5px] text-indigo-750 dark:text-indigo-300 font-black">fidelisemus@gmail.com</span> with password <span className="font-mono text-[10.5px] text-indigo-750 dark:text-indigo-300 font-black">admin123</span>.
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      if (adminLoginStep === 'mfa') {
+        return (
+          <div className={`min-h-screen ${theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans antialiased flex flex-col transition-colors duration-200`}>
+            {renderSimulationBar()}
+            <div className="flex-1 flex items-center justify-center p-6">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-8 space-y-6">
+                <div className="text-center space-y-2">
+                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-orange-50 dark:bg-orange-950/30 text-orange-600 shadow-inner">
+                    <Smartphone className="h-6 w-6 animate-pulse" />
+                  </div>
+                  <h1 className="text-lg font-black tracking-tight text-slate-900 dark:text-white uppercase font-sans">Google 2FA security sync</h1>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-sans max-w-sm mx-auto leading-normal">
+                    Enter the dynamic 6-digit PIN sync coefficient generated on your secure authenticator application block.
+                  </p>
+                </div>
+
+                {adminAuthError && (
+                  <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 dark:bg-rose-955/20 dark:border-rose-900 dark:text-rose-400 rounded-lg text-xs font-bold text-center">
+                    ⚠️ {adminAuthError}
+                  </div>
+                )}
+
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  if (adminMfaCode === '518420') {
+                    setIsMfaPassed(true);
+                    setLastAuditLogs(p => [
+                      { timestamp: new Date().toISOString().substring(0, 16), action: 'MFA Synced', details: 'Google Authenticator session claim token synced.', operator: 'fidelisemus@gmail.com', status: 'SUCCESS' },
+                      ...p
+                    ]);
+                  } else {
+                    setAdminAuthError('Invalid MFA coefficient synchronization token.');
+                  }
+                }} className="space-y-4 font-sans text-center">
+                  <div className="space-y-1.5 inline-block text-center">
+                    <label className="text-[10px] font-black uppercase text-slate-500 block">6-digit dynamic coefficient</label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={6}
+                      placeholder="000000"
+                      className="w-44 p-3 text-center font-mono font-black text-2xl tracking-widest border border-slate-300 dark:border-slate-705 rounded-xl bg-transparent text-slate-950 dark:text-white focus:ring-1 focus:ring-indigo-650"
+                      value={adminMfaCode}
+                      onChange={e => setAdminMfaCode(e.target.value.replace(/\D/g, ''))}
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-2.5 px-4 rounded-lg text-xs transition-colors cursor-pointer shadow-md shadow-orange-600/10 flex items-center justify-center space-x-2 font-sans"
+                  >
+                    <Smartphone className="h-4 w-4" />
+                    <span>Authorize Session</span>
+                  </button>
+                </form>
+
+                <div className="p-4 rounded-xl bg-orange-50/50 dark:bg-orange-955/20 border border-orange-100 dark:border-orange-850 text-center space-y-1.5 text-xs">
+                  <span className="font-extrabold text-orange-900 dark:text-orange-400 text-[10px] tracking-wide uppercase font-mono block">Simulated Google Authenticator</span>
+                  <p className="text-slate-600 dark:text-slate-400 text-[11px] font-sans leading-tight">Your synchronized dual auth token code coefficient is:</p>
+                  <span className="inline-block px-3 py-1 bg-white dark:bg-slate-955 border border-orange-200 dark:border-orange-900 rounded font-mono font-black text-lg text-orange-600 dark:text-orange-400 tracking-wider animate-pulse">518420</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      }
+    }
+
+    // 3. Systems Admin Console Dashboard View
+    return (
+      <div className={`min-h-screen ${theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans antialiased flex flex-col transition-colors duration-200`}>
+        {renderSimulationBar()}
+        
+        <div className="flex-1 flex flex-col md:flex-row">
+          {/* Sidebar */}
+          <aside className="w-full md:w-64 bg-slate-900 border-r border-slate-800 text-white flex flex-col justify-between shrink-0 p-5 space-y-6">
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-mono">Core System</h3>
+                <h1 className="text-sm font-black text-white mt-1 uppercase font-sans tracking-tight">Systems Admin Desk</h1>
+                <div className="mt-2 text-[9px] bg-rose-950/50 border border-rose-900 px-2.5 py-0.5 rounded text-rose-400 font-mono flex items-center gap-1.5 uppercase tracking-wide">
+                  <Shield className="h-3 w-3 animate-pulse" />
+                  <span>Verified: Principal Owner</span>
+                </div>
+              </div>
+
+              <div className="space-y-1 font-sans">
+                {[
+                  { id: 'generators', label: 'License Key Compiler', icon: Cpu },
+                  { id: 'tenants', label: 'Tenant Provisioning', icon: Users },
+                  { id: 'billing', label: 'Stripe Billing Desk', icon: CreditCard },
+                  { id: 'usage', label: 'API Gateway Metrics', icon: Activity },
+                  { id: 'health', label: 'Cluster Diagnostics', icon: Zap },
+                  { id: 'database', label: 'SQL Workstation Master', icon: Database },
+                  { id: 'audits', label: 'Immutable Audit Trail', icon: FileText },
+                  { id: 'vault', label: 'Rotate Secrets Vault', icon: Lock },
+                  { id: 'architect', label: 'Fintech Design Studio', icon: Sliders },
+                ].map((item) => {
+                  const Icon = item.icon;
+                  const active = selectedAdminSubTab === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        setSelectedAdminSubTab(item.id as any);
+                      }}
+                      className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-bold rounded-lg transition-all text-left cursor-pointer shrink-0 ${
+                        active 
+                          ? 'bg-rose-600 text-white shadow shadow-rose-600/10' 
+                          : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-slate-800 space-y-3 font-sans text-xs">
+              <div className="flex items-center justify-between text-[11px] text-slate-500">
+                <span>Active Connection:</span>
+                <span className="font-mono text-slate-300 font-bold">{simulatedIp}</span>
+              </div>
+              <button
+                onClick={() => {
+                  setIsMfaPassed(false);
+                  setAdminLoginStep('creds');
+                  setAdminCredentialPassword('');
+                  setLastAuditLogs(p => [
+                    { timestamp: new Date().toISOString().substring(0, 16), action: 'Admin Logout', details: 'Super Admin closed administrator session.', operator: 'fidelisemus@gmail.com', status: 'SUCCESS' },
+                    ...p
+                  ]);
+                }}
+                className="w-full inline-flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-rose-450 hover:text-rose-400 text-xs font-bold py-2 px-3 rounded-lg transition-colors cursor-pointer"
               >
-                <Shield className="h-4 w-4" />
-                <span>Go to Dedicated License Administration &rarr;</span>
-              </a>
-            ) : (
-              <div className="p-3 bg-slate-100 dark:bg-slate-800/80 text-left rounded-lg text-[11px] text-slate-500 font-mono">
-                💡 <span className="font-bold">Notice to Owner:</span> Set the <span className="font-bold text-slate-900 dark:text-white">VITE_ADMIN_PORTAL_URL</span> environment variable in Railway to point to your separate Administration server deployment URL.
+                <LogOut className="h-3.5 w-3.5" />
+                <span>Sign Out Admin</span>
+              </button>
+            </div>
+          </aside>
+
+          {/* Master Panel Context Canvas */}
+          <main className="flex-1 p-6 md:p-8 overflow-y-auto max-w-7xl mx-auto w-full space-y-8 text-slate-800 dark:text-slate-100">
+            
+            {/* TAB B1: LICENSE COMPILER */}
+            {selectedAdminSubTab === 'generators' && (
+              <div className="space-y-6 animate-fadeIn">
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm animate-fadeIn">
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-950 dark:text-white flex items-center gap-2 font-sans">
+                      <Cpu className="h-5 w-5 text-rose-600 animate-pulse" />
+                      Platform Licensing Compiler & Signer
+                    </h2>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed font-sans">
+                      Compile keys matching unique operational calendar start months. Pasting these signatures on Portal A authorizes secure database handshakes.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                  {/* Compiler Form */}
+                  <div className="lg:col-span-7 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-5 flex flex-col justify-between">
+                    <div>
+                      <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider font-mono">Create Monthly signed Lease Key</h3>
+                      
+                      {genError && (
+                        <div className="p-3 mt-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg text-xs font-bold font-sans">
+                          ⚠️ {genError}
+                        </div>
+                      )}
+
+                      <form onSubmit={handleGenerateLicenseKey} className="space-y-4 pt-3 font-sans">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-black uppercase text-slate-500 block">Signee Authority Email</label>
+                            <input
+                              type="text"
+                              required
+                              readOnly
+                              className="w-full p-2.5 font-mono border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs text-slate-500 rounded-lg outline-none cursor-not-allowed font-semibold text-center"
+                              value={genAdminEmail}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-black uppercase text-slate-500 block">Access Key Check (Password)</label>
+                            <input
+                              type="password"
+                              required
+                              placeholder="admin123"
+                              className="w-full p-2.5 font-mono border border-slate-300 dark:border-slate-705 rounded-lg bg-transparent text-xs text-slate-900 dark:text-white font-semibold text-center"
+                              value={genAdminPassword}
+                              onChange={e => setGenAdminPassword(e.target.value)}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-black uppercase text-slate-500 block">Operation Month (YYYY-MM)</label>
+                            <input
+                              type="text"
+                              required
+                              placeholder="2026-06"
+                              className="w-full p-2.5 font-mono border border-slate-305 dark:border-slate-705 rounded-lg bg-transparent text-xs text-slate-950 dark:text-white text-center font-bold tracking-widest animate-pulse"
+                              value={genTargetMonth}
+                              onChange={e => setGenTargetMonth(e.target.value)}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-black uppercase text-slate-550 block">Subscription Type Duration</label>
+                            <select
+                              value={genDuration}
+                              onChange={e => setGenDuration(e.target.value)}
+                              className="w-full p-2.5 border border-slate-305 dark:border-slate-705 rounded-lg bg-white dark:bg-slate-900 text-xs text-slate-950 dark:text-white font-bold"
+                            >
+                              <option value="monthly">Monthly Subscription (1 month)</option>
+                              <option value="quarterly">Quarterly Subscription (3 months)</option>
+                              <option value="biannually">Bi-Annually Subscription (6 months)</option>
+                              <option value="annually">Annually Subscription (12 months)</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <button
+                          type="submit"
+                          className="w-full bg-rose-600 hover:bg-rose-700 text-white font-extrabold py-3 px-4 rounded-xl text-xs transition-colors cursor-pointer shadow-md flex items-center justify-center gap-2"
+                        >
+                          <Cpu className="h-4 w-4" />
+                          <span>Compile & Sign Lease Key Token</span>
+                        </button>
+                      </form>
+                    </div>
+
+                    {generatedLicenseKey && (
+                      <div className="p-4 mt-4 bg-rose-50/50 dark:bg-rose-955/20 border border-rose-200 dark:border-rose-900 rounded-xl space-y-4 font-sans animate-fadeIn">
+                        <div className="flex items-center justify-between text-[10px] uppercase font-bold text-rose-700 dark:text-rose-400 font-mono tracking-wider">
+                          <span>Resulting Crypt Key Hash</span>
+                          <span className="bg-rose-150 dark:bg-rose-950 px-2 py-0.5 rounded font-bold font-mono">MD5_RSA_HMAC_MD5 Signature</span>
+                        </div>
+                        
+                        <div className="flex items-center justify-between bg-white dark:bg-slate-950 p-3 rounded-lg border border-rose-200 font-mono text-xs font-black text-rose-605 select-all tracking-widest break-all shadow-inner">
+                          <span>{generatedLicenseKey}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(generatedLicenseKey);
+                              setGenSuccess("Key copied directly to Admin Clipboard!");
+                            }}
+                            className="p-1 hover:bg-rose-50 dark:hover:bg-rose-950 rounded cursor-pointer text-slate-500"
+                          >
+                            <Copy className="h-4 w-4" />
+                          </button>
+                        </div>
+
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEnteredLicenseKey(generatedLicenseKey);
+                              setLicenseError('');
+                              setLicenseSuccess('');
+                              // Apply lease
+                              setTimeout(() => {
+                                handleApplyLicense();
+                                setGenSuccess("Keysign applied instantly to client portal!");
+                              }, 30);
+                            }}
+                            className="flex-1 bg-rose-605 hover:bg-rose-700 text-white font-extrabold py-2.5 px-3 rounded-lg text-xs transition-colors cursor-pointer text-center flex items-center justify-center gap-1 shadow"
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            <span>Instant-Apply to app.credguard.com</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEnteredLicenseKey(generatedLicenseKey);
+                              setLicenseError('');
+                              setLicenseSuccess('');
+                              setTimeout(() => {
+                                handleApplyLicense();
+                              }, 30);
+                              setSelectedDomain('app.credguard.com');
+                              navigateTo('/');
+                            }}
+                            className="bg-indigo-600 hover:bg-indigo-705 text-white font-extrabold py-2.5 px-3 rounded-lg text-xs transition-colors cursor-pointer text-center flex items-center justify-center gap-1 shadow"
+                          >
+                            <span>Go to Portal &rarr;</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {genSuccess && (
+                      <div className="p-3 mt-4 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 text-emerald-800 dark:text-emerald-400 rounded-lg text-xs font-bold animate-pulse text-center font-sans">
+                        ✨ {genSuccess}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Active Status Panels */}
+                  <div className="lg:col-span-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-4">
+                    <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider font-mono">Central System Subscription Lease</h3>
+                    
+                    <div className="space-y-4 pt-2 font-sans">
+                      <div className="p-4 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 leading-normal text-xs text-slate-500 space-y-3 font-mono">
+                        <div className="flex justify-between items-center text-[10px]">
+                          <span className="font-bold uppercase tracking-wider text-slate-400">Target Month:</span>
+                          <span className="font-mono bg-slate-105 dark:bg-slate-950 px-2 py-0.5 rounded font-black text-slate-800 dark:text-slate-200">{licenseStatus?.currentMonth}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-[10px]">
+                          <span className="font-bold uppercase tracking-wider text-slate-400">Software Lease Validity:</span>
+                          <span className={`font-mono px-2 py-0.5 rounded font-black text-white ${licenseStatus?.isValid ? 'bg-emerald-600' : 'bg-rose-600'}`}>
+                            {licenseStatus?.isValid ? 'ACTIVE' : 'EXPIRED'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center text-[10px]">
+                          <span className="font-bold uppercase tracking-wider text-slate-400">Lease Days Remaining:</span>
+                          <span className="font-mono bg-slate-105 dark:bg-slate-950 px-2 py-0.5 rounded font-black text-slate-800 dark:text-slate-200">{licenseStatus ? Math.max(0, Math.ceil(licenseStatus.daysRemaining)) : 0} days</span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider block font-mono">Developer Billing Cycle Simulators</span>
+                        <div className="grid grid-cols-2 gap-2 font-sans font-bold">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setLicenseStatus(prev => prev ? { ...prev, isValid: false, daysRemaining: 0 } : null);
+                              setLastAuditLogs(p => [
+                                { timestamp: new Date().toISOString().substring(0, 16), action: 'License Trip', details: 'Lease expired simulated manually.', operator: 'SIMULATOR', status: 'WARN' },
+                                ...p
+                              ]);
+                            }}
+                            className="bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-slate-705 border border-slate-200 dark:border-slate-750 py-1.5 px-2 rounded text-[11px] text-rose-600 text-center transition-all cursor-pointer"
+                          >
+                            Force Lease Expire
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setLicenseStatus(prev => prev ? { ...prev, isValid: true, daysRemaining: 30 } : null);
+                              setLastAuditLogs(p => [
+                                { timestamp: new Date().toISOString().substring(0, 16), action: 'License Auth', details: 'Extended core billing cycle lease directly.', operator: 'SIMULATOR', status: 'SUCCESS' },
+                                ...p
+                              ]);
+                            }}
+                            className="bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-slate-705 border border-slate-200 dark:border-slate-750 py-1.5 px-2 rounded text-[11px] text-emerald-600 text-center transition-all cursor-pointer"
+                          >
+                            Extend Lease (30 Days)
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
-            <button
-              onClick={() => navigateTo('/')}
-              className="w-full text-center text-xs text-indigo-600 hover:underline transition-colors mt-2 font-bold cursor-pointer"
-            >
-              Back to Loan Recovery Workspace
-            </button>
+            {/* TAB B2: TENANT PROVISIONING & CLIENT ACCOUNTS */}
+            {selectedAdminSubTab === 'tenants' && (
+              <div className="space-y-6 animate-fadeIn">
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-2xl flex items-center justify-between gap-4 shadow-sm">
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <Users className="h-5 w-5 text-rose-600 animate-pulse" />
+                      Platform tenant Provisioner & Databases
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-1 dark:text-slate-400 font-sans">
+                      Onboard new enterprise client loan banks. Provision dedicated database connections with isolated scopes in real-time.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* Left Provision Form */}
+                  <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+                    <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider font-mono">Onboard New B2B client</h3>
+                    
+                    <form onSubmit={(e) => {
+                      e.preventDefault();
+                      setLastAuditLogs(p => [
+                        { timestamp: new Date().toISOString().substring(0, 16), action: 'Tenant Onboard', details: 'Provisioned Bank of Boston cluster node on sharded database sandbox.', operator: 'fidelisemus@gmail.com', status: 'SUCCESS' },
+                        ...p
+                      ]);
+                      alert('Tenant created successfully! Connection parameters, PostgreSQL schemas, and access keys created for Bank of Boston.');
+                    }} className="space-y-4 font-sans">
+                      
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold uppercase text-slate-550 block">Corporate Name</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. Bank of Boston Inc."
+                          className="w-full p-2.5 border border-slate-350 dark:border-slate-705 rounded-lg text-xs bg-transparent text-slate-900 dark:text-white font-semibold"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold uppercase text-slate-550 block">Subscription Plan Tier</label>
+                        <select className="w-full p-2.5 border border-slate-350 dark:border-slate-705 rounded-lg text-xs bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-bold">
+                          <option value="scale">Scale Subscription Plan ($2,500/mo)</option>
+                          <option value="elite">Enterprise Elite Plan ($9,990/mo)</option>
+                          <option value="custom">Bespoke Sovereign Plan ($25,000/mo)</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold uppercase text-slate-555 block">Sharding isolation architecture</label>
+                        <select className="w-full p-2.5 border border-slate-350 dark:border-slate-705 rounded-lg text-xs bg-white dark:bg-slate-900 text-slate-905 dark:text-white font-bold">
+                          <option value="shard">Isolated PostgreSQL Database per Tenant (Partitioned Sharding)</option>
+                          <option value="schema">Isolated Database Schema (Shared DB instance)</option>
+                          <option value="shared">Shared schema with client key parameters</option>
+                        </select>
+                      </div>
+
+                      <button
+                        type="submit"
+                        className="w-full bg-rose-650 hover:bg-rose-700 text-white font-extrabold py-2.5 px-4 rounded-lg text-xs shadow-md transition-transform transform active:scale-95 cursor-pointer font-sans"
+                      >
+                        Provision Tenant Node Cluster
+                      </button>
+                    </form>
+                  </div>
+
+                  {/* Registered List */}
+                  <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-205 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col justify-between animate-fadeIn">
+                    <div>
+                      <div className="p-4 bg-slate-50 dark:bg-slate-900 border-b border-slate-250 dark:border-slate-800">
+                        <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider font-mono font-sans">B2B client tenants Registry</h3>
+                      </div>
+
+                      <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {[
+                          { name: 'Bank of America Group', tier: 'Enterprise Elite Plan', status: 'ACTIVE', database: 'bof_america_prod_sharded', usage: '1.2M hits/mo', renewal: '2026-07-01' },
+                          { name: 'Apex Capital Microfinance', tier: 'Scale Plan', status: 'ACTIVE', database: 'apex_cap_prod_shared', usage: '340k hits/mo', renewal: '2026-07-15' },
+                          { name: 'CreditTrust Sovereign Group', tier: 'Bespoke Sovereign Plan', status: 'ACTIVE', database: 'cred_trust_prod_sharded', usage: '5.8M hits/mo', renewal: '2026-06-30' },
+                          { name: 'Fidelity Mutual Credit', tier: 'Scale plan ($2,500/mo)', status: 'ACTIVE', database: 'fidelity_mutual_prod_shared', usage: '12k hits/mo', renewal: '2026-06-30' }
+                        ].map((tenant, idx) => (
+                          <div key={idx} className="p-4 flex items-center justify-between text-xs font-sans hover:bg-slate-50 dark:hover:bg-slate-800/10">
+                            <div className="space-y-1">
+                              <h4 className="font-extrabold text-slate-905 dark:text-white text-xs">{tenant.name}</h4>
+                              <div className="flex flex-wrap gap-2 text-[10px] text-slate-400 font-mono">
+                                <span className="font-extrabold text-rose-600">{tenant.tier}</span>
+                                <span>• DB: <span className="font-bold text-slate-500">{tenant.database}</span></span>
+                              </div>
+                            </div>
+                            
+                            <div className="flex items-center gap-4">
+                              <div className="text-right">
+                                <p className="font-black text-slate-800 dark:text-slate-205">{tenant.usage}</p>
+                                <p className="text-[9px] text-slate-450 uppercase font-mono tracking-wider font-semibold">Renew: {tenant.renewal}</p>
+                              </div>
+
+                              <span className="bg-emerald-50 text-emerald-800 dark:bg-emerald-950/20 dark:text-emerald-400 px-2 py-0.5 rounded-full text-[9px] font-black font-sans">
+                                ACTIVE
+                              </span>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  alert(`Tenant billing locks altered for ${tenant.name}. DB connections disconnected.`);
+                                  setLastAuditLogs(p => [
+                                    { timestamp: new Date().toISOString().substring(0, 16), action: 'Tenant Lock', details: `Temporarily suspended database connection lease for ${tenant.name}`, operator: 'fidelisemus@gmail.com', status: 'BLOCKED' },
+                                    ...p
+                                  ]);
+                                }}
+                                className="text-slate-400 hover:text-rose-600 p-1.5 hover:bg-slate-105 dark:hover:bg-slate-800 rounded transition-colors"
+                              >
+                                <Lock className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB B3: STRIPE BILLING LEDGER */}
+            {selectedAdminSubTab === 'billing' && (
+              <div className="space-y-6 animate-fadeIn font-sans">
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-2xl flex items-center justify-between gap-4 shadow-sm text-slate-850 dark:text-white animate-fadeIn">
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2 uppercase font-mono">
+                      <CreditCard className="h-5 w-5 text-rose-600 animate-pulse" />
+                      Stripe Corporate Billing Ledger
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-1 dark:text-slate-400 font-sans">
+                      Monitor corporate monthly lease invoices, Stripe payment states, webhook triggers, and automated contract balances.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+                  <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm">
+                    <span className="text-[10px] font-bold text-slate-405 uppercase tracking-wider block font-mono">Monthly Income (MRR)</span>
+                    <span className="text-2xl font-black block mt-2 text-rose-600 dark:text-rose-400 font-mono">$37,480 /mo</span>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm">
+                    <span className="text-[10px] font-bold text-slate-405 uppercase tracking-wider block font-mono">Collected Lease Income</span>
+                    <span className="text-2xl font-black block mt-2 text-slate-900 dark:text-white font-mono">$32,500</span>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm">
+                    <span className="text-[10px] font-bold text-slate-405 uppercase tracking-wider block font-mono">Draft Invoice Reserves</span>
+                    <span className="text-2xl font-black block mt-2 text-orange-600 font-mono">$4,980 Pending</span>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm">
+                    <span className="text-[10px] font-bold text-slate-405 uppercase tracking-wider block font-mono">Active Bank Leases count</span>
+                    <span className="text-2xl font-black block mt-2 text-slate-900 dark:text-white font-mono font-black animate-pulse">4 Accounts</span>
+                  </div>
+                </div>
+
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col justify-between">
+                  <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-900 flex-wrap gap-2">
+                    <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider font-mono">B2B Stripe Invoicing timeline</h3>
+                    <button
+                      type="button"
+                      onClick={() => alert('Stripe webhook manual trigger verified complete: client invoice auto collect simulated.')}
+                      className="text-[10px] font-black bg-rose-600 hover:bg-rose-750 text-white px-3 py-1 rounded transition-colors shadow"
+                    >
+                      Trigger Re-Sync Billing
+                    </button>
+                  </div>
+
+                  <div className="p-4 overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="text-slate-400 border-b border-slate-150 dark:border-slate-800">
+                          <th className="py-2.5 font-bold uppercase text-[9px] font-mono">Invoice ID</th>
+                          <th className="py-2.5 font-bold uppercase text-[9px] font-mono">Client Institution</th>
+                          <th className="py-2.5 font-bold uppercase text-[9px] font-mono">Invoice Date</th>
+                          <th className="py-2.5 font-bold uppercase text-[9px] font-mono">Amount</th>
+                          <th className="py-2.5 font-bold uppercase text-[9px] font-mono">Charge ID Hash</th>
+                          <th className="py-2.5 font-bold uppercase text-[9px] font-mono">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-350">
+                        {[
+                          { id: 'INV-2104', tenant: 'CreditTrust Sovereign Group', date: 'June 01, 2026', amount: '$9,990.00', hash: 'ch_stripe_fh128hjas8a127a92a11', status: 'PAID' },
+                          { id: 'INV-2103', tenant: 'Bank of America Group', date: 'May 28, 2026', amount: '$25,000.00', hash: 'ch_stripe_fh128hjas8a127a92a20', status: 'PAID' },
+                          { id: 'INV-2102', tenant: 'Apex Capital Microfinance', date: 'May 15, 2026', amount: '$2,500.00', hash: 'ch_stripe_fh128hjas8a127a92b02', status: 'PAID' },
+                          { id: 'INV-2101', tenant: 'Fidelity Mutual Credit', date: 'May 01, 2026', amount: '$2,500.00', hash: 'ch_stripe_fh128hjas8a127a92b15', status: 'PAID' }
+                        ].map((row, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/10 font-mono text-[11px]">
+                            <td className="py-3 font-semibold text-rose-600">{row.id}</td>
+                            <td className="py-3 font-sans font-bold text-slate-850 dark:text-white text-xs">{row.tenant}</td>
+                            <td className="py-3 font-sans">{row.date}</td>
+                            <td className="py-3 font-sans font-black text-slate-900 dark:text-white">{row.amount}</td>
+                            <td className="py-3 text-[10px] text-slate-400 font-mono truncate max-w-[140px]">{row.hash}</td>
+                            <td className="py-3">
+                              <span className="bg-emerald-50 text-emerald-800 dark:bg-emerald-950/20 dark:text-emerald-400 px-2 py-0.5 rounded-full text-[9px] font-black font-sans">
+                                {row.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB B4: API GATEWAY & PERFORMANCE */}
+            {selectedAdminSubTab === 'usage' && (
+              <div className="space-y-6 animate-fadeIn font-sans">
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-2xl flex items-center justify-between gap-4 shadow-sm">
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <Activity className="h-5 w-5 text-rose-600" />
+                      Global Ingress Gateway Operations & API Metrics
+                    </h2>
+                    <p className="text-xs text-slate-505 mt-1 dark:text-slate-405">
+                      Monitor active API Keys performance, throttle buckets, and request intervals across development sandboxes.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* Left Key counters */}
+                  <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+                    <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider font-mono">Access Keys usage summary</h3>
+                    
+                    <div className="space-y-3.5 divide-y divide-slate-100 dark:divide-slate-800 text-xs font-sans">
+                      <div className="pt-2 flex justify-between items-center leading-normal">
+                        <span className="text-slate-400 font-bold block">Sandbox Key Token:</span>
+                        <span className="font-mono bg-slate-55 dark:bg-slate-950 px-2.5 py-1 rounded text-rose-600 font-bold truncate max-w-[130px] font-mono font-black">{activeApiKeys.sandboxKey}</span>
+                      </div>
+                      <div className="pt-3.5 flex justify-between items-center leading-normal">
+                        <span className="text-slate-400 font-bold block">Sandbox Queries Log:</span>
+                        <span className="font-mono font-black text-slate-850 dark:text-slate-100 bg-slate-50 dark:bg-slate-950 px-2 py-0.5 rounded">{activeApiKeys.sandboxCalls} requests</span>
+                      </div>
+                      <div className="pt-3.5 flex justify-between items-center leading-normal">
+                        <span className="text-slate-400 font-bold block">Production Live Token:</span>
+                        <span className="font-mono bg-slate-55 dark:bg-slate-950 px-2.5 py-1 rounded text-rose-600 font-bold truncate max-w-[130px] font-mono font-black">{activeApiKeys.liveKey}</span>
+                      </div>
+                      <div className="pt-3.5 flex justify-between items-center leading-normal">
+                        <span className="text-slate-400 font-bold block">Production Queries Log:</span>
+                        <span className="font-mono font-black text-slate-850 dark:text-slate-100 bg-slate-55 dark:bg-slate-950 px-2 py-0.5 rounded font-mono font-bold animate-pulse">{activeApiKeys.liveCalls} requests</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right configuration rules */}
+                  <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-205 dark:border-slate-800 shadow-sm p-6 space-y-4">
+                    <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider font-mono">API Gateway security throttle</h3>
+                    
+                    <div className="space-y-3.5 text-xs text-slate-500 leading-normal font-sans">
+                      <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-150 dark:border-slate-850 space-y-1.5 animate-fadeIn">
+                        <span className="font-extrabold text-slate-800 dark:text-slate-200 block text-[12.5px] font-sans">Global Rate Limiter rule (Default)</span>
+                        <p>Allow up to <span className="font-bold text-rose-600">120 requests/minute</span> per single tenant connection key. Overflow inquiries are deflected immediately with <span className="font-mono bg-slate-100 dark:bg-slate-950 text-rose-500 px-1 py-0.5 rounded font-bold font-mono">429 RateLimit Exceeded</span>.</p>
+                      </div>
+
+                      <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-150 dark:border-slate-850 space-y-1.5 animate-fadeIn">
+                        <span className="font-extrabold text-slate-800 dark:text-slate-200 block text-[12.1px] font-sans">Burst Configuration limit rule</span>
+                        <p>Allow spikes up to <span className="font-bold text-rose-605">300 requests/minute</span> for transient integrations (such as batch kyc/repayment scans) up to 2 seconds before system firewall throttles active.</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB B5: INTERACTIVE HARDWARE HEALTH DIALS */}
+            {selectedAdminSubTab === 'health' && (
+              <div className="space-y-6 animate-fadeIn font-mono text-xs">
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-805 p-6 rounded-2xl flex items-center justify-between gap-4 font-sans shadow-sm text-slate-800 dark:text-white">
+                  <div>
+                    <h2 className="text-xl font-bold font-sans text-slate-955 dark:text-white flex items-center gap-2">
+                      <Zap className="h-5 w-5 text-rose-600" />
+                      Infrastructure Diagnostic telemetry
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-1 dark:text-slate-400 leading-relaxed font-sans mt-1">
+                      Dials mapping system thread pools, RAM buffers, CPU register temperatures, and Redis socket latencies.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-5 font-mono">
+                  <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-805 text-center space-y-3 shadow-sm">
+                    <span className="text-[10px] text-slate-400 block uppercase font-bold">Node CPU core Load</span>
+                    <div className="relative inline-flex items-center justify-center mt-2.5">
+                      <span className="absolute text-lg font-black text-rose-600">34%</span>
+                      <svg className="h-24 w-24">
+                        <circle cx="48" cy="48" r="36" fill="transparent" stroke="#f1f5f9" strokeWidth="8" className="dark:stroke-slate-950" />
+                        <circle cx="48" cy="48" r="36" fill="transparent" stroke="#e11d48" strokeWidth="8" strokeDasharray="226" strokeDashoffset="149" strokeLinecap="round" />
+                      </svg>
+                    </div>
+                  </div>
+
+                  <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-850 text-center space-y-3 shadow-sm">
+                    <span className="text-[10px] text-slate-400 block uppercase font-bold">Memory Utilization</span>
+                    <div className="relative inline-flex items-center justify-center mt-2.5">
+                      <span className="absolute text-base font-black text-slate-800 dark:text-slate-100">52%</span>
+                      <svg className="h-24 w-24">
+                        <circle cx="48" cy="48" r="36" fill="transparent" stroke="#f1f5f9" strokeWidth="8" className="dark:stroke-slate-950" />
+                        <circle cx="48" cy="48" r="36" fill="transparent" stroke="#6366f1" strokeWidth="8" strokeDasharray="226" strokeDashoffset="108" strokeLinecap="round" />
+                      </svg>
+                    </div>
+                  </div>
+
+                  <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-850 text-center space-y-3 shadow-sm text-slate-800">
+                    <span className="text-[10px] text-slate-400 block uppercase font-bold">Active pg threadpool</span>
+                    <div className="relative inline-flex items-center justify-center mt-2.5">
+                      <span className="absolute text-[13px] font-black text-emerald-600">12 / 100</span>
+                      <svg className="h-24 w-24">
+                        <circle cx="48" cy="48" r="36" fill="transparent" stroke="#f1f5f9" strokeWidth="8" className="dark:stroke-slate-950" />
+                        <circle cx="48" cy="48" r="36" fill="transparent" stroke="#10b981" strokeWidth="8" strokeDasharray="226" strokeDashoffset="199" strokeLinecap="round" />
+                      </svg>
+                    </div>
+                  </div>
+
+                  <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-850 text-center space-y-3 shadow-sm">
+                    <span className="text-[10px] text-slate-400 block uppercase font-bold">Pg Buffer Cache IOPS</span>
+                    <div className="relative inline-flex items-center justify-center mt-2.5">
+                      <span className="absolute text-sm font-black text-slate-800 dark:text-slate-100 font-black">920 io/s</span>
+                      <svg className="h-24 w-24">
+                        <circle cx="48" cy="48" r="36" fill="transparent" stroke="#f1f5f9" strokeWidth="8" className="dark:stroke-slate-950" />
+                        <circle cx="48" cy="48" r="36" fill="transparent" stroke="#f59e0b" strokeWidth="8" strokeDasharray="226" strokeDashoffset="80" strokeLinecap="round" />
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB B6: IMMUTABLE AUDIT LOGS TIMELINE */}
+            {selectedAdminSubTab === 'audits' && (
+              <div className="space-y-6 animate-fadeIn font-sans">
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-2xl flex items-center justify-between gap-4 shadow-sm animate-fadeIn">
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <FileText className="h-5 w-5 text-rose-600" />
+                      Immutable Security Audit Trail Ledger
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-1 dark:text-slate-400 leading-normal">
+                      Security records detailing master administration gestures, whitelist checks, and billing operations.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-white dark:bg-slate-905 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden flex flex-col justify-between">
+                  <div className="p-4 bg-slate-50 dark:bg-slate-905 border-b border-slate-250 dark:border-slate-800 flex justify-between items-center text-xs">
+                    <span className="font-bold text-slate-450 uppercase tracking-wider block font-mono font-bold">Ledger timelines (Immutable)</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLastAuditLogs(p => [
+                          { timestamp: new Date().toISOString().substring(0, 16), action: 'Ledger Audit', details: 'Manual integrity check on central ledger registries executed success.', operator: 'fidelisemus@gmail.com', status: 'SUCCESS' },
+                          ...p
+                        ]);
+                      }}
+                      className="text-[9.5px] font-bold bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-705 px-3 py-1 rounded transition-colors cursor-pointer font-sans font-extrabold text-slate-700 dark:text-slate-350"
+                    >
+                      Verify Ledger Integrity
+                    </button>
+                  </div>
+
+                  <div className="p-6 space-y-4 font-sans text-xs">
+                    {lastAuditLogs.map((log, idx) => (
+                      <div key={idx} className="flex gap-4 font-sans text-xs border-l-2 border-slate-150 dark:border-slate-800 pl-4 relative">
+                        <span className={`absolute h-2.5 w-2.5 rounded-full -left-[6px] top-1.5 ${
+                          log.status === 'SUCCESS' ? 'bg-emerald-500' : log.status === 'PENDING' ? 'bg-orange-500' : 'bg-rose-500'
+                        }`}></span>
+                        <div className="text-[11px] text-slate-450 font-mono self-start pt-0.5 whitespace-nowrap">{log.timestamp}</div>
+                        <div className="space-y-1 leading-normal">
+                          <p className="font-extrabold text-slate-950 dark:text-white uppercase tracking-wider text-[10.5px]">
+                            {log.action} <span className="font-mono text-[9px] lowercase text-slate-400 bg-slate-150 dark:bg-slate-950 px-1.5 py-0.5 rounded ml-1 font-semibold">{log.operator}</span>
+                          </p>
+                          <p className="text-slate-650 dark:text-slate-405 font-sans leading-relaxed">{log.details}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB B7: ROTATING VAULT SECRETS */}
+            {selectedAdminSubTab === 'vault' && (
+              <div className="space-y-6 animate-fadeIn font-sans">
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-805 p-6 rounded-2xl flex items-center justify-between gap-4 shadow-sm text-slate-855 dark:text-white animate-fadeIn">
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-950 dark:text-white flex items-center gap-2 uppercase font-mono">
+                      <Lock className="h-5 w-5 text-rose-600" />
+                      Super-Admin secrets rotation vault
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-1 dark:text-slate-400">
+                      Rotate platform master secrets safely under dual-authorized signature protocols.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-fadeIn font-sans text-xs">
+                  <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+                    <h3 className="text-xs font-black uppercase text-slate-450 tracking-wider font-mono">Sandbox API Secrets</h3>
+                    <div className="space-y-3.5 divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+                      <div>
+                        <span className="text-slate-450 uppercase text-[10px] tracking-wider block font-mono">Current Secret Token:</span>
+                        <div className="flex items-center gap-2 mt-1.5 select-all font-mono font-bold bg-slate-50 dark:bg-slate-950 p-2.5 rounded border border-slate-200 font-mono">
+                          <code className="text-emerald-600 select-all font-bold">{activeApiKeys.sandboxKey}</code>
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(activeApiKeys.sandboxKey);
+                              alert('Sandbox Master Key Copied');
+                            }}
+                            className="text-slate-400 hover:text-indigo-650 ml-auto cursor-pointer"
+                          >
+                            <Copy className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="pt-4 space-y-1.5 leading-normal text-slate-500">
+                        <span className="font-bold text-slate-755 dark:text-slate-300">Signature Keys Rotation:</span>
+                        <p className="text-slate-450 leading-relaxed text-[11px]">Rotates the API encryption parameters. Queries carrying old keys will reject gradually over 24 hours.</p>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          const hex = "cg_test_" + Array.from({length: 32}, () => Math.floor(Math.random()*16).toString(16)).join('');
+                          setLastAuditLogs(p => [
+                            { timestamp: new Date().toISOString().substring(0, 16), action: 'Vault Rotate', details: 'Rotated API master sandbox key.', operator: 'fidelisemus@gmail.com', status: 'SUCCESS' },
+                            ...p
+                          ]);
+                          setActiveApiKeys(prev => ({ ...prev, sandboxKey: hex }));
+                          alert('New API Sandbox Key Rotated!');
+                        }}
+                        className="w-full bg-slate-900 hover:bg-black text-white font-extrabold py-2 px-3 rounded-lg hover:shadow text-xs cursor-pointer text-center"
+                      >
+                        Rotate Sandbox Access Key
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+                    <h3 className="text-xs font-black uppercase text-slate-450 tracking-wider font-mono">Live API Secrets</h3>
+                    <div className="space-y-3.5 divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+                      <div>
+                        <span className="text-slate-455 uppercase text-[10px] tracking-wider block font-mono">Active Production Secret:</span>
+                        <div className="flex items-center gap-2 mt-1.5 select-all font-mono font-bold bg-slate-50 dark:bg-slate-950 p-2.5 rounded border border-slate-200 font-mono">
+                          <code className="text-rose-600 select-all font-bold">{activeApiKeys.liveKey}</code>
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(activeApiKeys.liveKey);
+                              alert('Live Production Token Copied');
+                            }}
+                            className="text-slate-400 hover:text-indigo-650 ml-auto cursor-pointer"
+                          >
+                            <Copy className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="pt-4 space-y-1 text-slate-500">
+                        <span className="font-bold text-slate-755 dark:text-slate-300 leading-normal block text-[11.5px]">Master Security Directive:</span>
+                        <p className="text-slate-450 leading-relaxed text-[11px]">Deploy zero-downtime micro-rotation when changing credentials. Production servers will gracefully switch database indexes during keysignature rotations.</p>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          const hex = "cg_live_" + Array.from({length: 32}, () => Math.floor(Math.random()*16).toString(16)).join('');
+                          setLastAuditLogs(p => [
+                            { timestamp: new Date().toISOString().substring(0, 16), action: 'Vault Rotate', details: 'Rotated API master live production key.', operator: 'fidelisemus@gmail.com', status: 'SUCCESS' },
+                            ...p
+                          ]);
+                          setActiveApiKeys(prev => ({ ...prev, liveKey: hex }));
+                          alert('New Live Production Key Rotated!');
+                        }}
+                        className="w-full bg-rose-605 hover:bg-rose-700 text-white font-extrabold py-2 px-3 rounded-lg hover:shadow text-xs cursor-pointer text-center"
+                      >
+                        Rotate Live Production Token
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB B8: SQL WORKSTATION MASTER */}
+            {selectedAdminSubTab === 'database' && (
+              <div className="space-y-8 animate-fadeIn text-slate-805 dark:text-slate-100">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-205 dark:border-slate-800 shadow-sm">
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-950 dark:text-white flex items-center gap-2 font-sans">
+                      <Database className="h-5 w-5 text-rose-600 animate-pulse" />
+                      Internal Database Workstation & SQLite Terminal
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-1 dark:text-slate-400 font-sans leading-normal">
+                      Direct visual query control over in-memory schemas and tenant borrower collections.
+                    </p>
+                  </div>
+                </div>
+
+                {renderInjectedDatabaseComponents()}
+              </div>
+            )}
+
+            {/* TAB B9: DESIGN STUDIO */}
+            {selectedAdminSubTab === 'architect' && (
+              <div className="space-y-6 animate-fadeIn font-sans">
+                <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between shadow-sm animate-fadeIn">
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-950 dark:text-white flex items-center gap-2 font-sans uppercase">
+                      <Sliders className="h-5 w-5 text-rose-600 animate-pulse" />
+                      Super-Admin Architecture Design Studio
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-1 dark:text-slate-405 font-sans">
+                      Explore detailed architectural blueprints, multi-tenant database topologies, role scopes, and system configuration matrices.
+                    </p>
+                  </div>
+                </div>
+
+                {renderArchitectureStudioView()}
+              </div>
+            )}
+
+          </main>
+        </div>
+      </div>
+    );
+  };
+
+  if (selectedDomain === 'admin.credguard.com') {
+    return renderSystemsAdminPortal();
+  }
+
+  if (currentPath === '/admin' && selectedDomain === 'app.credguard.com') {
+    return (
+      <div className={`min-h-screen ${theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans antialiased flex items-center justify-center p-4 transition-colors duration-200`}>
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-8 text-center space-y-6">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-450 shadow-inner">
+            <Lock className="h-6 w-6" />
           </div>
+          <div className="space-y-2">
+            <h1 className="text-xl font-black tracking-tight text-slate-905 dark:text-white uppercase font-sans">ACCESS REJECTED: ISOLATED PORTAL</h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-sans">
+              To enforce strict enterprise separation, this client workspace (<span className="font-bold">app.credguard.com</span>) contains no administrative endpoints or prefilled credentials.
+            </p>
+          </div>
+
+          <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200/55 dark:border-slate-800 text-[11px] font-mono text-left">
+            💡 <span className="font-extrabold uppercase text-indigo-650 tracking-wide block">How to access admin portal:</span>
+            Switch the host environment above inside the simulated green proxy band to <span className="underline font-bold text-slate-900 dark:text-indigo-400">admin.credguard.com</span> to connect securely.
+          </div>
+
+          <button
+            onClick={() => navigateTo('/')}
+            className="w-full text-center text-xs text-indigo-600 hover:underline transition-colors mt-2 font-bold cursor-pointer"
+          >
+            Back to Client Workspace
+          </button>
         </div>
       </div>
     );
   }
 
-  if (currentPath === '/license-admin' && !isAdminVerified && currentUser?.role !== 'Operator') {
+  if (currentPath === '/admin' && !isAdminVerified && currentUser?.role !== 'Operator') {
     return (
       <div className={`min-h-screen ${theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans antialiased flex items-center justify-center p-4 transition-colors duration-200 relative`}>
         {/* Real-time Theme Toggle Switcher */}
@@ -1117,7 +2458,7 @@ export default function App() {
 
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-8 space-y-6 text-slate-800 dark:text-slate-100">
           <div className="text-center space-y-2">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 shadow-inner">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-650 dark:text-indigo-400 shadow-inner">
               <Shield className="h-6 w-6" />
             </div>
             <h1 className="text-xl font-black tracking-tight text-slate-900 dark:text-white uppercase font-sans">Admin Console Locked</h1>
@@ -1128,7 +2469,7 @@ export default function App() {
 
           <div className="space-y-4">
             {adminGateError && (
-              <div className="p-3 bg-rose-50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/45 text-rose-700 dark:text-rose-400 rounded-xl text-xs font-semibold">
+              <div className="p-3 bg-rose-50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/45 text-rose-700 dark:text-rose-450 rounded-xl text-xs font-semibold">
                 ⚠️ {adminGateError}
               </div>
             )}
@@ -1148,7 +2489,7 @@ export default function App() {
                   type="password"
                   required
                   placeholder="••••••••"
-                  className="w-full p-3 font-mono border border-slate-300 dark:border-slate-700 rounded-lg bg-transparent text-xs text-center tracking-widest focus:ring-2 focus:ring-indigo-600 text-slate-900 dark:text-white"
+                  className="w-full p-3 font-mono border border-slate-300 dark:border-slate-700 rounded-lg bg-transparent text-xs text-center tracking-widest focus:ring-2 focus:ring-indigo-650 text-slate-900 dark:text-white"
                   value={adminGatePassword}
                   onChange={e => {
                     setAdminGatePassword(e.target.value);
@@ -1178,7 +2519,7 @@ export default function App() {
     );
   }
 
-  if (currentPath === '/license-admin') {
+  if (currentPath === '/admin') {
     return (
       <div className={`min-h-screen ${theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans antialiased transition-colors duration-200`}>
         {/* Navigation / Header */}
@@ -1536,77 +2877,79 @@ export default function App() {
               </button>
             </form>
 
-            <div className="pt-4 border-t border-slate-100 dark:border-slate-800 text-center space-y-3">
-              {VITE_APP_MODE === 'app' ? (
-                VITE_ADMIN_PORTAL_URL ? (
-                  <a
-                    href={VITE_ADMIN_PORTAL_URL}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center space-x-2 text-xs font-black text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer font-sans"
-                  >
-                    <Shield className="h-4 w-4" />
-                    <span>Go to Dedicated License Administration &rarr;</span>
-                  </a>
-                ) : (
-                  <div className="p-3 bg-slate-50 dark:bg-slate-950/40 rounded-xl border border-slate-100 dark:border-slate-800/80 text-left font-sans text-[10px] text-slate-500 space-y-1">
-                    <span className="font-bold text-slate-700 dark:text-slate-300 block">🔑 Isolated Admin Portal Hosted Separately</span>
-                    <p>Activate licenses locally using the form above. Set the <code className="bg-slate-100 dark:bg-slate-900 px-1 rounded text-red-500 font-bold">VITE_ADMIN_PORTAL_URL</code> environment variable to link your standalone administrator portal.</p>
-                  </div>
-                )
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowAdminGate(!showAdminGate);
-                      setAdminGateError('');
-                      setAdminGatePassword('');
-                    }}
-                    className="inline-flex items-center space-x-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors cursor-pointer"
-                  >
-                    <Lock className="h-3.5 w-3.5" />
-                    <span>{showAdminGate ? "Hide Admin Gateway" : "Systems Admin Gateway"}</span>
-                  </button>
-
-                  {showAdminGate && (
-                    <div className="bg-slate-50 dark:bg-slate-950/50 p-4 rounded-xl border border-slate-200/50 dark:border-slate-800/80 space-y-3 text-left animate-fadeIn">
-                      <span className="text-[10px] font-black uppercase text-indigo-600 dark:text-indigo-400 tracking-wider block font-mono">Restricted Administration Access</span>
-                      <div className="space-y-2">
-                        <input
-                          type="password"
-                          placeholder="Enter Authority Password"
-                          className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 text-xs text-center focus:ring-1 focus:ring-indigo-600 focus:border-indigo-600 text-slate-900 dark:text-white font-semibold"
-                          value={adminGatePassword}
-                          onChange={e => {
-                            setAdminGatePassword(e.target.value);
-                            setAdminGateError('');
-                          }}
-                        />
-                        {adminGateError && (
-                          <p className="text-[10px] font-bold text-rose-600 dark:text-rose-450 text-center">❌ {adminGateError}</p>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (adminGatePassword === 'admin123') {
-                              setIsAdminVerified(true);
-                              setAdminGateError('');
-                              navigateTo('/license-admin');
-                            } else {
-                              setAdminGateError('Invalid Authority Password');
-                            }
-                          }}
-                          className="w-full bg-slate-900 hover:bg-black dark:bg-indigo-600 dark:hover:bg-indigo-700 text-white font-bold py-2 px-3 rounded-lg text-xs transition-colors cursor-pointer text-center"
-                        >
-                          Authenticate Admin Console
-                        </button>
-                      </div>
+            {currentUser?.role === 'Operator' && (
+              <div className="pt-4 border-t border-slate-100 dark:border-slate-800 text-center space-y-3">
+                {VITE_APP_MODE === 'app' ? (
+                  VITE_ADMIN_PORTAL_URL ? (
+                    <a
+                      href={VITE_ADMIN_PORTAL_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center space-x-2 text-xs font-black text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer font-sans"
+                    >
+                      <Shield className="h-4 w-4" />
+                      <span>Go to Dedicated License Administration &rarr;</span>
+                    </a>
+                  ) : (
+                    <div className="p-3 bg-slate-50 dark:bg-slate-950/40 rounded-xl border border-slate-100 dark:border-slate-800/80 text-left font-sans text-[10px] text-slate-500 space-y-1">
+                      <span className="font-bold text-slate-700 dark:text-slate-300 block">🔑 Isolated Admin Portal Hosted Separately</span>
+                      <p>Activate licenses locally using the form above. Set the <code className="bg-slate-100 dark:bg-slate-900 px-1 rounded text-red-500 font-bold">VITE_ADMIN_PORTAL_URL</code> environment variable to link your standalone administrator portal.</p>
                     </div>
-                  )}
-                </>
-              )}
-            </div>
+                  )
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAdminGate(!showAdminGate);
+                        setAdminGateError('');
+                        setAdminGatePassword('');
+                      }}
+                      className="inline-flex items-center space-x-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-indigo-650 dark:hover:text-indigo-400 transition-colors cursor-pointer"
+                    >
+                      <Lock className="h-3.5 w-3.5" />
+                      <span>{showAdminGate ? "Hide Admin Gateway" : "Systems Admin Gateway"}</span>
+                    </button>
+
+                    {showAdminGate && (
+                      <div className="bg-slate-50 dark:bg-slate-950/50 p-4 rounded-xl border border-slate-200/50 dark:border-slate-800/80 space-y-3 text-left animate-fadeIn">
+                        <span className="text-[10px] font-black uppercase text-indigo-600 dark:text-indigo-400 tracking-wider block font-mono">Restricted Administration Access</span>
+                        <div className="space-y-2">
+                          <input
+                            type="password"
+                            placeholder="Enter Authority Password"
+                            className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 text-xs text-center focus:ring-1 focus:ring-indigo-650 focus:border-indigo-650 text-slate-900 dark:text-white font-semibold"
+                            value={adminGatePassword}
+                            onChange={e => {
+                              setAdminGatePassword(e.target.value);
+                              setAdminGateError('');
+                            }}
+                          />
+                          {adminGateError && (
+                            <p className="text-[10px] font-bold text-rose-600 dark:text-rose-450 text-center">❌ {adminGateError}</p>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (adminGatePassword === 'admin123') {
+                                setIsAdminVerified(true);
+                                setAdminGateError('');
+                                navigateTo('/admin');
+                              } else {
+                                setAdminGateError('Invalid Authority Password');
+                              }
+                            }}
+                            className="w-full bg-slate-900 hover:bg-black dark:bg-indigo-600 dark:hover:bg-indigo-700 text-white font-bold py-2 px-3 rounded-lg text-xs transition-colors cursor-pointer text-center"
+                          >
+                            Authenticate Admin Console
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
 
             <div className="bg-slate-50 dark:bg-slate-950/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800/80 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400 space-y-1 font-sans">
               <span className="font-bold text-slate-700 dark:text-slate-300 block mb-1">🔑 Subscription Licensing Rules</span>
@@ -4022,62 +5365,1298 @@ export default function App() {
 
         {/* TAB 6: CONNECT INTEGRATION SDKS & WEBHOOK MANUAL */}
         {activeTab === 'sdks' && (
-          <div id="sdks-tab" className="space-y-8 animate-fadeIn">
-            <div>
-              <h2 className="text-xl font-bold text-slate-900">Corporate REST API SDK Integration Modules</h2>
-              <p className="text-xs text-slate-500">Integrate with your live Android, Flutter, iOS, and Web legacy codebases effortlessly.</p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          <div id="sdks-tab" className="space-y-8 animate-fadeIn text-slate-800 dark:text-slate-100">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900 dark:text-white">Corporate integration & Developer Core</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Integrate digital loan intelligence & repayment synchronization with your legacy backends or banking apps.</p>
+              </div>
               
-              {/* SDK index list selector */}
-              <div className="md:col-span-1 space-y-2">
-                <div className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Target Platform SDK</div>
-                
-                {[
-                  { id: 'js', label: 'JavaScript & Web SDK', lang: 'javascript' },
-                  { id: 'kt', label: 'Android Kotlin SDK', lang: 'android' },
-                  { id: 'swift', label: 'iOS Swift Module', lang: 'swift' },
-                  { id: 'webhook', label: 'Webhook Validation Script', lang: 'webhook' }
-                ].map(item => (
-                  <button
-                    key={item.id}
-                    onClick={() => copyToClipboard(SDK_TEMPLATES[item.lang as keyof typeof SDK_TEMPLATES], item.id)}
-                    className="w-full text-left p-3.5 rounded-lg border border-slate-200 bg-white hover:bg-indigo-50/20 text-xs font-semibold flex items-center justify-between transition-all group shrink-0 cursor-pointer"
-                  >
-                    <span className="text-slate-800">{item.label}</span>
-                    {copiedSdkKey === item.id ? (
-                      <Check className="h-4 w-4 text-emerald-600 shrink-0" />
-                    ) : (
-                      <Copy className="h-4 w-4 text-slate-400 group-hover:text-slate-700 shrink-0" />
-                    )}
-                  </button>
-                ))}
-
-                <div className="p-4 rounded-xl bg-indigo-50 border border-indigo-100 text-[11px] leading-relaxed text-indigo-950 space-y-1.5 mt-6">
-                  <h4 className="font-bold">Automated Sync Flow</h4>
-                  <p>When borrowers hit payment gateways like Stripe or Paystack, gateway webhooks notify CredGuard, realigning collections automatically.</p>
-                </div>
+              {/* Pillar sub-tab controller */}
+              <div className="flex bg-slate-100 dark:bg-slate-900 p-1 rounded-xl border border-slate-200/50 dark:border-slate-800/80">
+                <button
+                  type="button"
+                  onClick={() => setSdkSubTab('docs_portal')}
+                  className={`px-4 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center space-x-1.5 ${
+                    sdkSubTab === 'docs_portal'
+                      ? 'bg-white dark:bg-slate-800 text-indigo-650 dark:text-white shadow-sm'
+                      : 'text-slate-500 dark:text-slate-450 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  <span>Developer Docs Hub</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSdkSubTab('sdks')}
+                  className={`px-4 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center space-x-1.5 ${
+                    sdkSubTab === 'sdks'
+                      ? 'bg-white dark:bg-slate-800 text-indigo-650 dark:text-white shadow-sm'
+                      : 'text-slate-500 dark:text-slate-450 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <Smartphone className="h-3.5 w-3.5" />
+                  <span>Client SDKs</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSdkSubTab('api_ref')}
+                  className={`px-4 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center space-x-1.5 ${
+                    sdkSubTab === 'api_ref'
+                      ? 'bg-white dark:bg-slate-800 text-indigo-650 dark:text-white shadow-sm'
+                      : 'text-slate-500 dark:text-slate-450 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <Terminal className="h-3.5 w-3.5" />
+                  <span>Interactive API Sandbox</span>
+                </button>
               </div>
-
-              {/* Detailed code playground view */}
-              <div className="md:col-span-3 rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm flex flex-col">
-                <div className="bg-slate-950 text-slate-400 px-4 py-2.5 flex items-center justify-between border-b border-slate-900 text-xs">
-                  <span className="font-mono text-[11px] text-slate-300">integration_playground_sdk.ts</span>
-                  <span className="text-slate-500">Read Only</span>
-                </div>
-                <div className="bg-slate-900 p-5 overflow-x-auto max-h-[500px]">
-                  <pre className="text-xs text-indigo-200 font-mono leading-relaxed select-all">
-                    {SDK_TEMPLATES.javascript}
-                  </pre>
-                </div>
-                <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-between items-center text-xs text-slate-500">
-                  <span>Press copy on the left to copy complete native class code safely.</span>
-                  <span className="font-mono">v1.2.0 Stable</span>
-                </div>
-              </div>
-
             </div>
+
+            {sdkSubTab === 'sdks' && (
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                
+                {/* SDK index list selector */}
+                <div className="md:col-span-1 space-y-2">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-3 block">Target Platform SDK</div>
+                  
+                  {[
+                    { id: 'js', label: 'JavaScript & Web SDK', lang: 'javascript' },
+                    { id: 'kt', label: 'Android Kotlin SDK', lang: 'android' },
+                    { id: 'swift', label: 'iOS Swift Module', lang: 'swift' },
+                    { id: 'webhook', label: 'Webhook Validation Script', lang: 'webhook' }
+                  ].map(item => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => copyToClipboard(SDK_TEMPLATES[item.lang as keyof typeof SDK_TEMPLATES], item.id)}
+                      className="w-full text-left p-3.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold flex items-center justify-between transition-all group shrink-0 cursor-pointer"
+                    >
+                      <span className="text-slate-800 dark:text-slate-200">{item.label}</span>
+                      {copiedSdkKey === item.id ? (
+                        <Check className="h-4 w-4 text-emerald-600 shrink-0" />
+                      ) : (
+                        <Copy className="h-4 w-4 text-slate-450 dark:text-slate-600 group-hover:text-slate-700 dark:group-hover:text-slate-300 shrink-0" />
+                      )}
+                    </button>
+                  ))}
+
+                  <div className="p-4 rounded-xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-150 dark:border-indigo-900/30 text-[11px] leading-relaxed text-indigo-950 dark:text-indigo-400 space-y-1.5 mt-6">
+                    <h4 className="font-bold text-indigo-900 dark:text-indigo-300 uppercase tracking-wide">Automated Sync Flow</h4>
+                    <p>When borrowers hit payment gateways like Stripe or Paystack, gateway webhooks notify CredGuard, realigning collections automatically.</p>
+                  </div>
+                </div>
+
+                {/* Detailed code playground view */}
+                <div className="md:col-span-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-sm flex flex-col">
+                  <div className="bg-slate-950 text-slate-400 px-4 py-2.5 flex items-center justify-between border-b border-slate-900 text-xs">
+                    <span className="font-mono text-[11px] text-slate-300">integration_playground_sdk.ts</span>
+                    <span className="text-slate-500">Read Only</span>
+                  </div>
+                  <div className="bg-slate-900 p-5 overflow-x-auto max-h-[500px]">
+                    <pre className="text-xs text-indigo-200 font-mono leading-relaxed select-all">
+                      {SDK_TEMPLATES.javascript}
+                    </pre>
+                  </div>
+                  <div className="p-4 bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex justify-between items-center text-xs text-slate-500 dark:text-slate-400">
+                    <span>Press copy on the left to copy complete native class code safely.</span>
+                    <span className="font-mono">v1.2.0 Stable</span>
+                  </div>
+                </div>
+
+              </div>
+            )}
+
+            {sdkSubTab === 'api_ref' && (
+              <div className="space-y-6">
+                
+                {/* REST API SECTION */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                  
+                  {/* Left Column: API Directory + Security Key */}
+                  <div className="lg:col-span-4 space-y-4">
+                    
+                    {/* Security Authentication Key details Block */}
+                    <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-indigo-650 dark:text-indigo-400">
+                          <Lock className="h-4 w-4" />
+                          <h4 className="text-xs font-black uppercase tracking-wider">REST API Auth Engine</h4>
+                        </div>
+                        <span className="text-[9px] font-bold uppercase tracking-wide bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-100 dark:border-indigo-900/40">
+                          Bearer Flow
+                        </span>
+                      </div>
+                      
+                      <div className="text-[11px] text-slate-550 dark:text-slate-400 leading-relaxed font-sans space-y-2">
+                        <p>Authenticate banking integrations and client wrappers safely using developer tokens. Switch modes to dynamically align document playouts:</p>
+                        
+                        <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100 dark:bg-slate-950 rounded-xl border border-slate-200/50 dark:border-slate-850">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedAuthKeyType('sandbox')}
+                            className={`py-1.5 text-[10px] font-bold rounded-lg transition-all cursor-pointer ${
+                              selectedAuthKeyType === 'sandbox'
+                                ? 'bg-white dark:bg-slate-800 text-indigo-650 dark:text-white shadow-sm'
+                                : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                            }`}
+                          >
+                            Sandbox
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedAuthKeyType('live')}
+                            className={`py-1.5 text-[10px] font-bold rounded-lg transition-all cursor-pointer ${
+                              selectedAuthKeyType === 'live'
+                                ? 'bg-white dark:bg-slate-800 text-amber-600 dark:text-amber-450 shadow-sm'
+                                : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                            }`}
+                          >
+                            Live
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedAuthKeyType('license')}
+                            className={`py-1.5 text-[10px] font-bold rounded-lg transition-all cursor-pointer ${
+                              selectedAuthKeyType === 'license'
+                                ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm'
+                                : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                            }`}
+                          >
+                            License
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Info Panel depending on which type is active */}
+                      <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200/60 dark:border-slate-850 space-y-3.5">
+                        {selectedAuthKeyType === 'sandbox' && (
+                          <div className="space-y-3 animate-fadeIn">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[9px] font-black uppercase text-amber-700 bg-amber-50 dark:bg-amber-950/20 px-1.5 py-0.5 rounded border border-amber-200/40 font-mono tracking-widest">
+                                TEST KEY (SANDBOX)
+                              </span>
+                              <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
+                                {developerKeys?.sandboxCalls || 0} calls
+                              </span>
+                            </div>
+
+                            <div className="space-y-1.5 text-[10px] font-sans">
+                              <div className="text-slate-550 dark:text-slate-400 leading-relaxed">
+                                Ideal for building banking app connectors, staging payments and testing speed-limit geolocation triggers before going live. All data flows stay isolated inside the Sandbox ledger.
+                              </div>
+                              <div className="text-[9px] text-slate-400 dark:text-slate-550 mt-1">
+                                Generated: {developerKeys ? new Date(developerKeys.sandboxCreated).toLocaleDateString() : 'Active'}
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              <div className="p-2 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-[10px] font-mono break-all text-slate-800 dark:text-slate-200 select-all flex items-center justify-between gap-1.5">
+                                <span className="truncate">{developerKeys?.sandboxKey || 'cg_test_loading...'}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => copyToClipboard(developerKeys?.sandboxKey || '', 'sandbox_token')}
+                                  className="text-slate-450 hover:text-indigo-650 dark:hover:text-indigo-400 shrink-0 cursor-pointer"
+                                >
+                                  {copiedSdkKey === 'sandbox_token' ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                                </button>
+                              </div>
+
+                              <button
+                                type="button"
+                                disabled={isRotatingKey !== null}
+                                onClick={() => handleRotateKey('sandbox')}
+                                className="w-full py-1.5 text-[10px] font-black tracking-wider uppercase bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-850 text-slate-700 dark:text-slate-350 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-center space-x-1.5 transition-all shadow-sm cursor-pointer disabled:opacity-50"
+                              >
+                                {isRotatingKey === 'sandbox' ? (
+                                  <span className="animate-spin text-indigo-650 h-3 w-3 border-2 border-indigo-600 border-t-transparent rounded-full" />
+                                ) : (
+                                  <RefreshCw className="h-3 w-3 text-slate-450" />
+                                )}
+                                <span>{isRotatingKey === 'sandbox' ? 'Rotating Key...' : 'Rotate Sandbox Key'}</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {selectedAuthKeyType === 'live' && (
+                          <div className="space-y-3 animate-fadeIn">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[9px] font-black uppercase text-amber-700 bg-amber-50 dark:bg-amber-950/20 px-1.5 py-0.5 rounded border border-amber-200/40 font-mono tracking-widest">
+                                LIVE KEY (PRODUCTION)
+                              </span>
+                              <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
+                                {developerKeys?.liveCalls || 0} calls
+                              </span>
+                            </div>
+
+                            <div className="space-y-1.5 text-[10px] font-sans">
+                              <div className="text-slate-550 dark:text-slate-400 leading-relaxed text-red-650 dark:text-red-400 flex gap-1.5 items-start">
+                                <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                                <span>Secures active API payloads inside production servers. Directly triggers collections synchronization and updates primary customer records. Use with absolute caution.</span>
+                              </div>
+                              <div className="text-[9px] text-slate-400 dark:text-slate-550 mt-1">
+                                Generated: {developerKeys ? new Date(developerKeys.liveCreated).toLocaleDateString() : 'Active'}
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              <div className="p-2 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-[10px] font-mono break-all text-slate-800 dark:text-slate-200 select-all flex items-center justify-between gap-1.5">
+                                <span className="truncate">{developerKeys?.liveKey || 'cg_live_loading...'}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => copyToClipboard(developerKeys?.liveKey || '', 'live_token')}
+                                  className="text-slate-450 hover:text-indigo-650 dark:hover:text-indigo-400 shrink-0 cursor-pointer"
+                                >
+                                  {copiedSdkKey === 'live_token' ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                                </button>
+                              </div>
+
+                              <button
+                                type="button"
+                                disabled={isRotatingKey !== null}
+                                onClick={() => handleRotateKey('live')}
+                                className="w-full py-1.5 text-[10px] font-black tracking-wider uppercase bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-850 text-slate-700 dark:text-slate-350 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-center space-x-1.5 transition-all shadow-sm cursor-pointer disabled:opacity-50"
+                              >
+                                {isRotatingKey === 'live' ? (
+                                  <span className="animate-spin text-indigo-650 h-3 w-3 border-2 border-indigo-600 border-t-transparent rounded-full" />
+                                ) : (
+                                  <RefreshCw className="h-3 w-3 text-slate-450" />
+                                )}
+                                <span>{isRotatingKey === 'live' ? 'Rotating Key...' : 'Rotate Production Key'}</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {selectedAuthKeyType === 'license' && (
+                          <div className="space-y-3 animate-fadeIn">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[9px] font-black uppercase text-emerald-700 bg-emerald-50 dark:bg-emerald-950/20 px-1.5 py-0.5 rounded border border-emerald-200/40 font-mono tracking-widest">
+                                SYSTEM LEASE LICENSE
+                              </span>
+                              <span className="text-[10px] text-emerald-600 font-bold font-mono">
+                                Tenant Level
+                              </span>
+                            </div>
+
+                            <div className="space-y-1.5 text-[10px] font-sans">
+                              <div className="text-slate-550 dark:text-slate-400 leading-relaxed font-sans">
+                                The master software lease key validating this tenant container. Configured inside the main "Licensing" panel of the dashboard.
+                              </div>
+                              <div className="text-[9px] text-slate-400 dark:text-slate-550 mt-1 font-mono">
+                                Format: CG-[PlanMonth]-[Signature]
+                              </div>
+                            </div>
+
+                            <div className="space-y-1">
+                              <div className="p-2 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-[10px] font-mono break-all text-slate-800 dark:text-slate-200 select-all flex items-center justify-between gap-1.5">
+                                <span className="truncate">{licenseStatus?.activeLicenseKey || 'No license active. Open "Licensing" tab to apply.'}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => copyToClipboard(licenseStatus?.activeLicenseKey || '', 'license_token_doc')}
+                                  className="text-slate-450 hover:text-emerald-600 shrink-0 cursor-pointer"
+                                >
+                                  {copiedSdkKey === 'license_token_doc' ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Interactive Endpoints list Switches */}
+                    <div className="space-y-2">
+                      <div className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-2 px-1 block">Live API Endpoints</div>
+                      
+                      {[
+                        { id: 'track_session', method: 'POST', path: '/api/sessions/track', title: 'Track User Interaction' },
+                        { id: 'create_payment', method: 'POST', path: '/api/payments', title: 'Post Loan Repayment' },
+                        { id: 'get_borrowers', method: 'GET', path: '/api/borrowers', title: 'Query Borrowers Directory' },
+                        { id: 'predict_default', method: 'GET', path: '/api/risk/predict-default/:loanId', title: 'ML AI Default Predictor' }
+                      ].map((item) => {
+                        const isSelected = selectedEndpointId === item.id;
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => setSelectedEndpointId(item.id)}
+                            className={`w-full text-left p-3 rounded-xl border transition-all text-xs flex flex-col space-y-1.5 cursor-pointer ${
+                              isSelected
+                                ? 'border-indigo-500 bg-indigo-50/15 dark:bg-indigo-950/20 shadow-sm'
+                                : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/60'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between pointer-events-none">
+                              <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md ${
+                                item.method === 'POST'
+                                  ? 'bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-400'
+                                  : 'bg-emerald-100 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-400'
+                              }`}>
+                                {item.method}
+                              </span>
+                              <span className="font-mono text-[10px] text-slate-500 dark:text-slate-400 font-semibold">{item.path}</span>
+                            </div>
+                            <span className="text-xs font-black text-slate-800 dark:text-slate-200">{item.title}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                  </div>
+
+                  {/* Right Column: Endpoint interactive Request/Response Specifications */}
+                  <div className="lg:col-span-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden flex flex-col">
+                    {(() => {
+                      let dynamicAuthToken = '[your_license_key]';
+                      if (selectedAuthKeyType === 'sandbox') {
+                        dynamicAuthToken = developerKeys?.sandboxKey || 'cg_test_5f18d72ae5cf438bb36130636cd4f91d';
+                      } else if (selectedAuthKeyType === 'live') {
+                        dynamicAuthToken = developerKeys?.liveKey || 'cg_live_9a3c8e10df22472ba5670891d966036f';
+                      } else if (selectedAuthKeyType === 'license') {
+                        dynamicAuthToken = licenseStatus?.activeLicenseKey || 'CG-M202606-A1B2C3D4';
+                      }
+
+                      const endpointsMap: Record<string, {
+                        method: string;
+                        path: string;
+                        title: string;
+                        desc: string;
+                        reqBody: string;
+                        respBody: string;
+                        headers: Array<{ key: string, val: string, desc: string }>;
+                      }> = {
+                        track_session: {
+                          method: 'POST',
+                          path: '/api/sessions/track',
+                          title: 'Track Borrower Session & Verification',
+                          desc: 'Invoked by the mobile application container on screen changes or session startups to persist compliance, verify geographic constraints, track operating system health, and capture non-private borrower data attributes securely.',
+                          headers: [
+                            { key: 'Authorization', val: `Bearer ${dynamicAuthToken}`, desc: 'Provides the system-level validation handshake.' },
+                            { key: 'Content-Type', val: 'application/json', desc: 'Encodes parameters into standard raw JSON.' }
+                          ],
+                          reqBody: JSON.stringify({
+                            borrowerId: "bor_9012",
+                            appVersion: "v2.0.4",
+                            deviceType: "mobile_android",
+                            os: "Android 13.0 (API 33)",
+                            browser: "Mobile Native App Wrapper",
+                            consentGiven: true
+                          }, null, 2),
+                          respBody: JSON.stringify({
+                            success: true,
+                            sessionId: "ses_99214_891b",
+                            capturedIp: "197.210.64.12",
+                            operatorLogged: true,
+                            complianceVerification: "verified_auth_sha256",
+                            timestamp: "2026-06-08T09:27:00Z"
+                          }, null, 2)
+                        },
+                        create_payment: {
+                          method: 'POST',
+                          path: '/api/payments',
+                          title: 'Submit Borrower Payment Repayment',
+                          desc: 'Posts a real-time amortization transaction. Can be bound to dynamic client webhooks or card charge completion triggers inside Stripe, Paystack, Flutterwave or your custom cores to immediately reduce outstanding borrower principal.',
+                          headers: [
+                            { key: 'Authorization', val: `Bearer ${dynamicAuthToken}`, desc: 'Provides active subscription validation.' },
+                            { key: 'Content-Type', val: 'application/json', desc: 'Encodes parameters into standard raw JSON.' }
+                          ],
+                          reqBody: JSON.stringify({
+                            borrowerId: "bor_9012",
+                            loanId: "loa_2024",
+                            amount: 450.00,
+                            method: "Stripe/Card",
+                            reference: "txn_stripe_99a823b19",
+                            notes: "Automated balance amortization via Bank Mobile Application"
+                          }, null, 2),
+                          respBody: JSON.stringify({
+                            success: true,
+                            message: "Payment captured and borrower balance updated successfully.",
+                            payment: {
+                              id: "pay_8819",
+                              borrowerId: "bor_9012",
+                              loanId: "loa_2024",
+                              amount: 450.00,
+                              method: "Stripe/Card",
+                              reference: "txn_stripe_99a823b19",
+                              timestamp: "2026-06-08T09:27:00Z"
+                            }
+                          }, null, 2)
+                        },
+                        get_borrowers: {
+                          method: 'GET',
+                          path: '/api/borrowers',
+                          title: 'Retrieve and Sync Borrowers Directory',
+                          desc: 'Returns a paginated list of all corporate borrowers registered under this tenant, with corresponding metadata, phone indexes, email references and status flags.',
+                          headers: [
+                            { key: 'Authorization', val: `Bearer ${dynamicAuthToken}`, desc: 'Authenticates system operator.' }
+                          ],
+                          reqBody: '// GET request contains query parameters within URL. No body payload is required.',
+                          respBody: JSON.stringify([
+                            {
+                              id: "bor_9012",
+                              name: "Chidi Nwachukwu",
+                              email: "chidi.nwachukwu@example.com",
+                              phone: "+234 812 3456 789",
+                              address: "45 Victoria Island, Lagos",
+                              business: "Retail Logistics Hub Ltd",
+                              status: "Active",
+                              createdAt: "2025-05-12T14:20:00Z"
+                            }
+                          ], null, 2)
+                        },
+                        predict_default: {
+                          method: 'GET',
+                          path: '/api/risk/predict-default/:loanId',
+                          title: 'AI Machine-Learning Defaults Indicator',
+                          desc: 'Queries our custom server-side ML model heuristics to calculate default probability, flagging key drivers (e.g. payout patterns, delayed logs, session drops) alongside suggested mitigating workflows.',
+                          headers: [
+                            { key: 'Authorization', val: `Bearer ${dynamicAuthToken}`, desc: 'Authenticates system operator.' }
+                          ],
+                          reqBody: '// Parameterized query. Replace \':loanId\' with target loan identifier string in URI.',
+                          respBody: JSON.stringify({
+                            success: true,
+                            loanId: "loa_2024",
+                            borrowerName: "Sarah Jenkins",
+                            outstandingBalance: 1700.05,
+                            aiPrediction: {
+                              defaultProbability: 38.4,
+                              calculatedRiskCategory: "MEDIUM RISK",
+                              riskDrivers: [
+                                "Last payment delay (7 days past schedule)",
+                                "Frequent offline session connection timeouts"
+                              ],
+                              mitigationProtocols: [
+                                "Schedule card recurring debit check",
+                                "Automated gentle SMS reminder schedule"
+                              ]
+                            }
+                          }, null, 2)
+                        }
+                      };
+
+                      const currentItem = endpointsMap[selectedEndpointId] || endpointsMap.track_session;
+
+                      return (
+                        <>
+                          {/* Banner Info */}
+                          <div className="p-6 bg-slate-50 dark:bg-slate-950 border-b border-slate-250 dark:border-slate-800 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <span className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-md ${
+                                currentItem.method === 'POST'
+                                  ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-400'
+                                  : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-400'
+                              }`}>
+                                {currentItem.method}
+                              </span>
+                              <span className="font-mono text-xs font-bold text-slate-800 dark:text-slate-200">
+                                {window.location.origin}{currentItem.path}
+                              </span>
+                            </div>
+                            <h3 className="text-base font-bold text-slate-900 dark:text-white">{currentItem.title}</h3>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-sans">{currentItem.desc}</p>
+                          </div>
+
+                          <div className="p-6 space-y-6">
+                            
+                            {/* Headers Parameter View */}
+                            <div className="space-y-2">
+                              <span className="text-[10px] font-black uppercase tracking-wider text-slate-450 block font-mono">Mandatory HTTP Headers</span>
+                              <div className="border border-slate-250 dark:border-slate-850 rounded-xl overflow-hidden divide-y divide-slate-200 dark:divide-slate-850 text-xs">
+                                {currentItem.headers.map((h, idx) => (
+                                  <div key={idx} className="p-3 bg-slate-50 dark:bg-slate-950/40 grid grid-cols-12 gap-2">
+                                    <div className="col-span-4 font-mono font-bold text-indigo-650 dark:text-indigo-400">{h.key}</div>
+                                    <div className="col-span-3 font-mono text-slate-500 dark:text-slate-500">{h.val}</div>
+                                    <div className="col-span-5 text-slate-500 dark:text-slate-400 font-sans">{h.desc}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Dynamic JSON Payloads side by side */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              
+                              {/* Request Body Column */}
+                              <div className="space-y-1.5 flex flex-col">
+                                <div className="flex items-center justify-between bg-slate-100 dark:bg-slate-850 px-3 py-1.5 rounded-t-lg border-t border-x border-slate-250 dark:border-slate-800">
+                                  <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 tracking-wider font-mono">JSON Request Body</span>
+                                  {currentItem.method === 'POST' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => copyToClipboard(currentItem.reqBody, 'req_payload')}
+                                      className="text-[10px] text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer font-bold"
+                                    >
+                                      {copiedSdkKey === 'req_payload' ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                                      <span>{copiedSdkKey === 'req_payload' ? 'Copied' : 'Copy'}</span>
+                                    </button>
+                                  )}
+                                </div>
+                                <div className="bg-slate-950 p-4 rounded-b-lg border-b border-x border-slate-250 dark:border-slate-850 overflow-x-auto h-[260px] font-mono text-[11px] text-indigo-150 leading-relaxed">
+                                  <pre className="select-all">{currentItem.reqBody}</pre>
+                                </div>
+                              </div>
+
+                              {/* Expected JSON Response */}
+                              <div className="space-y-1.5 flex flex-col">
+                                <div className="flex items-center justify-between bg-slate-100 dark:bg-slate-850 px-3 py-1.5 rounded-t-lg border-t border-x border-slate-250 dark:border-slate-800">
+                                  <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 tracking-wider font-mono">JSON Expected Response (200 OK)</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => copyToClipboard(currentItem.respBody, 'resp_payload')}
+                                    className="text-[10px] text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer font-bold"
+                                  >
+                                    {copiedSdkKey === 'resp_payload' ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                                    <span>{copiedSdkKey === 'resp_payload' ? 'Copied' : 'Copy'}</span>
+                                  </button>
+                                </div>
+                                <div className="bg-slate-950 p-4 rounded-b-lg border-b border-x border-slate-250 dark:border-slate-850 overflow-x-auto h-[260px] font-mono text-[11px] text-emerald-300 leading-relaxed">
+                                  <pre className="select-all">{currentItem.respBody}</pre>
+                                </div>
+                              </div>
+
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+
+                </div>
+
+                {/* API System Error Codes Reference Grid card */}
+                <div className="p-6 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm text-xs space-y-4">
+                  <div className="flex items-center gap-2 text-rose-600 dark:text-rose-450 font-black uppercase tracking-wider block">
+                    <AlertTriangle className="h-4.5 w-4.5" />
+                    <span>REST API HTTP Error Code Standards</span>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                    {[
+                      { code: '200 / 201', label: 'Success Indicators', class: 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/20 dark:text-emerald-400', desc: 'Resource captured, stored, or calculated successfully.' },
+                      { code: '400', label: 'Bad Request', class: 'bg-rose-50 text-rose-800 dark:bg-rose-950/20 dark:text-rose-400', desc: 'Syntactic parameter mismatch or required attributes missing from JSON payload.' },
+                      { code: '401', label: 'Unauthorized', class: 'bg-rose-50 text-rose-800 dark:bg-rose-950/20 dark:text-rose-400', desc: 'Invalid or missing Bearer authorization headers.' },
+                      { code: '403', label: 'Lease Forbidden', class: 'bg-yellow-50 text-yellow-800 dark:bg-yellow-950/20 dark:text-yellow-400', desc: 'Valid Authority License activation status check failed (invalid or expired software lease).' },
+                      { code: '500', label: 'Server Ledger Conflict', class: 'bg-slate-200/50 text-slate-800 dark:bg-slate-800 dark:text-slate-300', desc: 'Internal system resource locks or database operations execution failure.' }
+                    ].map((err, idx) => (
+                      <div key={idx} className="p-3 bg-white dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-850 space-y-1.5 flex flex-col justify-between shadow-sm">
+                        <div className="space-y-1">
+                          <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md ${err.class}`}>{err.code}</span>
+                          <h5 className="font-bold text-slate-800 dark:text-slate-200 text-xs">{err.label}</h5>
+                        </div>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed font-sans">{err.desc}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+              </div>
+            )}
+
+            {sdkSubTab === 'docs_portal' && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start animate-fadeIn">
+                {/* LHS Sidebar Navigation */}
+                <div className="lg:col-span-3 space-y-4">
+                  <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm space-y-4">
+                    <div className="text-[10px] font-black uppercase tracking-wider text-slate-450 dark:text-slate-550 mb-1 px-1">
+                      Developer Guides
+                    </div>
+                    <nav className="space-y-1">
+                      {[
+                        { id: 'overview', label: '1. Overview & Base URLs' },
+                        { id: 'auth', label: '2. Authentication Key Flow' },
+                        { id: 'rate_limit', label: '3. Limits & Response Codes' }
+                      ].map(sec => (
+                        <button
+                          key={sec.id}
+                          type="button"
+                          onClick={() => setDocsActiveSec(sec.id)}
+                          className={`w-full text-left py-1.5 px-3 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
+                            docsActiveSec === sec.id
+                              ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-bold border-l-2 border-indigo-650'
+                              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                          }`}
+                        >
+                          {sec.label}
+                        </button>
+                      ))}
+                    </nav>
+
+                    <div className="text-[10px] font-black uppercase tracking-wider text-slate-450 dark:text-slate-550 pt-2 mb-1 px-1 border-t border-slate-100 dark:border-slate-800">
+                      Core REST API Ref
+                    </div>
+                    <nav className="space-y-0.5 max-h-[240px] overflow-y-auto">
+                      {[
+                        { id: 'ep_borrowers_post', method: 'POST', label: '/borrowers' },
+                        { id: 'ep_borrowers_get', method: 'GET', label: '/borrowers/:id' },
+                        { id: 'ep_risk_score', method: 'POST', label: '/risk/score' },
+                        { id: 'ep_loans_post', method: 'POST', label: '/loans' },
+                        { id: 'ep_loans_get', method: 'GET', label: '/loans/:id' },
+                        { id: 'ep_recovery_trigger', method: 'POST', label: '/recovery/trigger' },
+                        { id: 'ep_events', method: 'POST', label: '/events' },
+                        { id: 'ep_fraud', method: 'POST', label: '/fraud/analyze' },
+                        { id: 'ep_consent_create', method: 'POST', label: '/consent/create' },
+                        { id: 'ep_consent_get', method: 'GET', label: '/consent/:id' }
+                      ].map(sec => (
+                        <button
+                          key={sec.id}
+                          type="button"
+                          onClick={() => setDocsActiveSec(sec.id)}
+                          className={`w-full text-left py-1.5 px-2 rounded-lg text-xs font-mono flex items-center justify-between cursor-pointer transition-colors ${
+                            docsActiveSec === sec.id
+                              ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-750 dark:text-indigo-300 font-bold border-l-2 border-indigo-655'
+                              : 'text-slate-650 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-805'
+                          }`}
+                        >
+                          <span className="truncate">{sec.label}</span>
+                          <span className={`text-[8px] font-black uppercase px-1 rounded scale-90 ${
+                            sec.method === 'POST' ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-400' : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-400'
+                          }`}>{sec.method}</span>
+                        </button>
+                      ))}
+                    </nav>
+
+                    <div className="text-[10px] font-black uppercase tracking-wider text-slate-450 dark:text-slate-550 pt-2 mb-1 px-1 border-t border-slate-100 dark:border-slate-800">
+                      Integrations
+                    </div>
+                    <nav className="space-y-1">
+                      {[
+                        { id: 'webhooks', label: 'Outgoing Webhooks' },
+                        { id: 'sdks', label: 'Mobile SDK Binding' },
+                        { id: 'postman', label: 'Postman Import' },
+                        { id: 'checklist', label: 'Testing Checklist ✅' }
+                      ].map(sec => (
+                        <button
+                          key={sec.id}
+                          type="button"
+                          onClick={() => setDocsActiveSec(sec.id)}
+                          className={`w-full text-left py-1.5 px-3 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
+                            docsActiveSec === sec.id
+                              ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-bold border-l-2 border-indigo-650'
+                              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                          }`}
+                        >
+                          {sec.label}
+                        </button>
+                      ))}
+                    </nav>
+                  </div>
+
+                  <div className="p-4 bg-indigo-50/20 dark:bg-indigo-950/10 border border-indigo-100 dark:border-indigo-900/30 rounded-2xl space-y-2 text-[11px] text-slate-550 dark:text-slate-400">
+                    <p className="font-semibold text-indigo-700 dark:text-indigo-300 flex items-center gap-1">
+                      <HelpCircle className="h-3.5 w-3.5" />
+                      Offline Markdown Copie
+                    </p>
+                    <p className="leading-relaxed">A beautifully formatted Markdown copy is active inside your workspace as <code className="font-mono text-[10px] bg-indigo-100/60 dark:bg-indigo-900/40 px-1 py-0.5 rounded">/API_DOCUMENTATION.md</code>. You can export or reference it directly.</p>
+                  </div>
+                </div>
+
+                {/* RHS Main Docs Viewer Area */}
+                <div className="lg:col-span-9 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm flex flex-col min-h-[600px]">
+                  {/* Dynamic page content resolver */}
+                  {(() => {
+                    let title = "API Documentation Portal";
+                    let methodLabel = "";
+                    let customUrl = "/api/...";
+                    let description = "";
+                    let requiredHeaders = [
+                      { key: "Authorization", val: "Bearer " + (developerKeys?.sandboxKey || "cg_test_5f18d72ae5cf438bb36130636cd4f91d"), desc: "Authenticates your API requests safely." },
+                      { key: "Content-Type", val: "application/json", desc: "Sets request format encoding standard." }
+                    ];
+                    let parameters: Array<{ name: string, type: string, req: string, desc: string }> = [];
+                    let reqBody = "";
+                    let respSucc = "";
+                    let respErr = "";
+
+                    if (docsActiveSec === 'overview') {
+                      return (
+                        <div className="p-8 space-y-6">
+                          <div className="space-y-2">
+                            <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                              <Globe className="h-5 w-5 text-indigo-650" />
+                              1. Overview & Base Connection Architecture
+                            </h3>
+                            <p className="text-xs text-slate-500 leading-relaxed dark:text-slate-400">
+                              Welcome to the CredGuard API. Our APIs enable instantaneous syncing of consumer debt liabilities, real-time risk rating scorecards, direct-debit mandate registrations, and automated collections orchestration. Connect to the URL endpoints detailed below.
+                            </p>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                            <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-850 rounded-xl space-y-2">
+                              <span className="text-[10px] font-black uppercase text-indigo-600 font-mono tracking-wider block">SANDBOX TESTING NETWORK</span>
+                              <div className="font-mono text-xs text-slate-800 dark:text-slate-100 select-all font-semibold p-2 bg-white dark:bg-slate-900 border border-slate-150 dark:border-indigo-900/40 rounded break-all">
+                                https://ais-dev-g2hlkbu6hmb3svafx5wuhf-50487580477.europe-west2.run.app/api
+                              </div>
+                              <p className="text-[11px] text-slate-500">Used to build and execute test requests. Fully isolated virtual bookkeeping ledger.</p>
+                            </div>
+
+                            <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-850 rounded-xl space-y-2">
+                              <span className="text-[10px] font-black uppercase text-rose-600 font-mono tracking-wider block">PRODUCTION ACTIVE NETWORK</span>
+                              <div className="font-mono text-xs text-slate-800 dark:text-slate-100 select-all font-semibold p-2 bg-white dark:bg-slate-900 border border-slate-150 dark:border-indigo-900/40 rounded break-all">
+                                https://ais-dev-g2hlkbu6hmb3svafx5wuhf-50487580477.europe-west2.run.app
+                              </div>
+                              <p className="text-[11px] text-slate-500">Active live transactions routing. Coordinates live payments and automated dunning alerts.</p>
+                            </div>
+                          </div>
+
+                          <div className="space-y-3 pt-2">
+                            <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wide">Key Design Features</h4>
+                            <ul className="text-xs text-slate-500 leading-relaxed dark:text-slate-400 space-y-2 list-disc list-inside">
+                              <li><strong>RESTful Design:</strong> Abides strictly by POST, GET, PUT, and DELETE methods.</li>
+                              <li><strong>JSON Exchanges:</strong> All payloads must be structured containing validated JSON packets.</li>
+                              <li><strong>Corporate Sandboxed Ledgers:</strong> In-memory arrays configured to allow rapid test calls instantly.</li>
+                            </ul>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    if (docsActiveSec === 'auth') {
+                      return (
+                        <div className="p-8 space-y-6 animate-fadeIn">
+                          <div className="space-y-2">
+                            <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                              <Lock className="h-5 w-5 text-indigo-650" />
+                              2. Authentication Requirements
+                            </h3>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                              CredGuard uses standard API keys passed inside HTTP request headers to validate authentication. Include your Bearer key token using the <code className="font-mono px-1 py-0.5 bg-slate-100 dark:bg-slate-800 text-[11px] rounded">Authorization</code> header.
+                            </p>
+                          </div>
+
+                          <div className="bg-slate-950 p-4 rounded-xl font-mono text-xs text-emerald-300 leading-relaxed overflow-x-auto space-y-1 shadow-md">
+                            <div>GET /api/borrowers HTTP/1.1</div>
+                            <div>Host: ais-dev-g2hlkbu6hmb3svafx5wuhf-50487580477.europe-west2.run.app</div>
+                            <div className="text-indigo-300 font-bold">Authorization: Bearer {developerKeys?.sandboxKey || "cg_test_5f18d72ae5cf438bb36130636cd4f91d"}</div>
+                            <div>Content-Type: application/json</div>
+                          </div>
+
+                          <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-sm">
+                            <table className="w-full text-left text-xs text-slate-600 dark:text-slate-400">
+                              <thead className="bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-350 font-bold border-b border-slate-200 dark:border-slate-850">
+                                <tr>
+                                  <th className="p-4">Key Class</th>
+                                  <th className="p-4">Sample Sandbox Variable</th>
+                                  <th className="p-4">Description</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-150 dark:divide-slate-850">
+                                <tr>
+                                  <td className="p-4 font-semibold text-slate-900 dark:text-white">Sandbox Token Key</td>
+                                  <td className="p-4 font-mono font-semibold text-indigo-650 dark:text-indigo-400 shrink-0 select-all">{developerKeys?.sandboxKey || "cg_test_5f18d72ae5cf438bb36130636cd4f91d"}</td>
+                                  <td className="p-4">Used for test sandbox interactions. Does not affect live customer balances.</td>
+                                </tr>
+                                <tr>
+                                  <td className="p-4 font-semibold text-slate-900 dark:text-white">Live Active Token Key</td>
+                                  <td className="p-4 font-mono font-semibold text-indigo-650 dark:text-indigo-400 shrink-0 select-all">{developerKeys?.liveKey || "cg_live_9a3c8e10df22472ba5670891d966036f"}</td>
+                                  <td className="p-4 text-emerald-600 font-semibold">Active live transaction token. Validates live bank feeds.</td>
+                                </tr>
+                                <tr>
+                                  <td className="p-4 font-semibold text-slate-900 dark:text-white">Tenant Lease License Key</td>
+                                  <td className="p-4 font-mono font-semibold text-indigo-650 dark:text-indigo-400 shrink-0 select-all">{licenseStatus?.activeLicenseKey || "CG-M202606-A1B2C3D4"}</td>
+                                  <td className="p-4">System master license lease validating active instance capability limits.</td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    if (docsActiveSec === 'rate_limit') {
+                      return (
+                        <div className="p-8 space-y-6">
+                          <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                            <Activity className="h-5 w-5 text-indigo-650" />
+                            3. Limit Parameters & Standard Error Framework
+                          </h3>
+                          
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-850 rounded-xl space-y-2">
+                              <h4 className="text-xs font-black uppercase text-indigo-650">Rate Limiter Profile Policy</h4>
+                              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                                - Sandbox Keys: 100 requests per sliding window of 60 seconds.<br />
+                                - Production Keys: 500 requests per sliding window of 60 seconds.
+                              </p>
+                              <p className="text-[10px] text-slate-400">Exceeding this window throws <code className="font-mono bg-slate-100 dark:bg-slate-800 text-rose-600 px-1 rounded">HTTP 429 Too Many Requests</code> with an active retry parameter.</p>
+                            </div>
+
+                            <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-850 rounded-xl space-y-2">
+                              <h4 className="text-xs font-black uppercase text-rose-600">Standardized Fallback Payload</h4>
+                              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                                Errors include descriptive strings within the JSON packet structure to simplify client diagnostics.
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="space-y-2 pt-2">
+                            <h4 className="text-xs font-bold uppercase text-slate-800 dark:text-slate-200 tracking-wide">Structured Status Code Maps</h4>
+                            <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                              <table className="w-full text-left text-xs text-slate-600 dark:text-slate-400">
+                                <thead className="bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-350 font-bold border-b border-slate-200 dark:border-slate-850">
+                                  <tr>
+                                    <th className="p-3">Status</th>
+                                    <th className="p-3">Interpretation</th>
+                                    <th className="p-3">Triggers context</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-150 dark:divide-slate-850">
+                                  <tr>
+                                    <td className="p-3 font-semibold font-mono text-emerald-600">200 / 201</td>
+                                    <td className="p-3">OK / Created</td>
+                                    <td className="p-3">Records modified, analyzed, or successfully logged into master database.</td>
+                                  </tr>
+                                  <tr>
+                                    <td className="p-3 font-semibold font-mono text-rose-600">400</td>
+                                    <td className="p-3">Bad Request</td>
+                                    <td className="p-3">Missing required attributes like <code className="font-mono font-bold text-[10px]">borrowerId</code> or malformed payload.</td>
+                                  </tr>
+                                  <tr>
+                                    <td className="p-3 font-semibold font-mono text-rose-600">401</td>
+                                    <td className="p-3">Unauthorized</td>
+                                    <td className="p-3">Invalid or missing Bearer authorization headers.</td>
+                                  </tr>
+                                  <tr>
+                                    <td className="p-3 font-semibold font-mono text-rose-650">404</td>
+                                    <td className="p-3">Not Found</td>
+                                    <td className="p-3">Database tracer checked and found no matching rows.</td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // Map sections to concrete parameters & endpoints
+                    if (docsActiveSec === "ep_borrowers_post") {
+                      title = "Create Borrower Identity";
+                      methodLabel = "POST";
+                      customUrl = "/api/borrowers";
+                      description = "Registers new borrower profiles on the ledgers. Associates default verified statuses and prepares systemic ledger allocations.";
+                      parameters = [
+                        { name: "name", type: "string", req: "Yes", desc: "Full legal name of the entity, minimum of 3 characters (e.g. 'Sarah Jenkins')" },
+                        { name: "email", type: "string", req: "Yes", desc: "Corporate email address configuration, validated for integrity (e.g. 'sarah@sjlogistics.com')" },
+                        { name: "phone", type: "string", req: "No", desc: "International phone string coordinates (e.g. '+234803912341')" },
+                        { name: "company", type: "string", req: "No", desc: "Registrant business corporate name." }
+                      ];
+                      reqBody = JSON.stringify({ name: "Sarah Jenkins", email: "sarah.jenkins@gmail.com", phone: "+2348098765432", company: "SJ Global Logistics", kycStatus: "Verified" }, null, 2);
+                      respSucc = JSON.stringify({ id: "bor_1720459381", name: "Sarah Jenkins", email: "sarah.jenkins@gmail.com", phone: "+2348098765432", company: "SJ Global Logistics", kycStatus: "Verified", createdAt: "2026-06-08T10:41:00Z" }, null, 2);
+                      respErr = JSON.stringify({ error: "Required fields missing. 'name' and 'email' are mandatory properties." }, null, 2);
+                    } else if (docsActiveSec === "ep_borrowers_get") {
+                      title = "Query Borrower Details";
+                      methodLabel = "GET";
+                      customUrl = "/api/borrowers/:borrowerId";
+                      description = "Retrieves stored metadata regarding verified system entities directly off ledger databases.";
+                      parameters = [
+                        { name: ":borrowerId", type: "string", req: "Yes (Path)", desc: "The identifier trace starting with 'bor_' (e.g. 'bor_01')" }
+                      ];
+                      reqBody = "// GET HTTP Request contains parameters inside path scope. Body payload unnecessary.";
+                      respSucc = JSON.stringify({ id: "bor_01", name: "Adebayo Chukwuma", email: "adebayo.c@yahoo.com", phone: "+2348034509122", company: "Chukwuma Retail Ltd", kycStatus: "Verified", createdAt: "2026-05-24T09:30:00Z", payoutConsistency: 92 }, null, 2);
+                      respErr = JSON.stringify({ error: "Borrower identity could not be resolved." }, null, 2);
+                    } else if (docsActiveSec === "ep_risk_score") {
+                      title = "Calculate Risk Scorecard";
+                      methodLabel = "POST";
+                      customUrl = "/api/risk/score";
+                      description = "Computes an analytic scorecard based on historical defaults, outstanding principal layers, and payout telemetry.";
+                      parameters = [
+                        { name: "borrowerId", type: "string", req: "Yes (JSON)", desc: "Target identity tracer to evaluate (e.g. 'bor_01')" }
+                      ];
+                      reqBody = JSON.stringify({ borrowerId: "bor_01" }, null, 2);
+                      respSucc = JSON.stringify({ success: true, borrowerId: "bor_01", borrowerName: "Adebayo Chukwuma", riskScore: 65, riskBand: "HIGH", analytics: { totalOutstanding: 4500, overdueCount: 1, kycStatus: "Verified", payoutConsistency: 92 }, computations: ["1 active overdue or default loan instance flagged."], assessmentDate: "2026-06-08T10:41:00Z" }, null, 2);
+                      respErr = JSON.stringify({ error: "Borrower identity could not be resolved." }, null, 2);
+                    } else if (docsActiveSec === "ep_loans_post") {
+                      title = "Post Core Loan Disbursal";
+                      methodLabel = "POST";
+                      customUrl = "/api/loans";
+                      description = "Spins up loan facilities on designated borrower profiles, calculating schedule amortizations automatically based on principal sizes.";
+                      parameters = [
+                        { name: "borrowerId", type: "string", req: "Yes", desc: "Registered borrower profile ID (e.g. 'bor_01')" },
+                        { name: "amount", type: "number", req: "Yes", desc: "Aggregate sum of requested principal (e.g. 5000)" },
+                        { name: "interestRate", type: "number", req: "No", desc: "Fixed yearly compounding interest rating (defaults to 10)" },
+                        { name: "durationMonths", type: "number", req: "No", desc: "Maturity duration inside months registry (defaults to 3)" }
+                      ];
+                      reqBody = JSON.stringify({ borrowerId: "bor_01", amount: 2500, interestRate: 12, durationMonths: 3 }, null, 2);
+                      respSucc = JSON.stringify({ id: "loan_1720459999", borrowerId: "bor_01", borrowerName: "Adebayo Chukwuma", amount: 2500, interestRate: 12, startDate: "2026-06-08T10:41:00Z", dueDate: "2026-09-08T10:41:00Z", amountPaid: 0, latePenalties: 0, status: "Active", repaymentSchedule: [ { dueDate: "2026-07-08T10:41:00Z", amount: 934, paid: false } ] }, null, 2);
+                      respErr = JSON.stringify({ error: "Loan principal parameter values are mathematically invalid or out of bounds." }, null, 2);
+                    } else if (docsActiveSec === "ep_loans_get") {
+                      title = "Fetch Loan Ledger Row";
+                      methodLabel = "GET";
+                      customUrl = "/api/loans/:loanId";
+                      description = "Returns current balances, maturity statistics and payment tracking dates for specified loan agreements.";
+                      parameters = [
+                        { name: ":loanId", type: "string", req: "Yes (Path)", desc: "The unique identifier starting with 'loan_'" }
+                      ];
+                      reqBody = "// GET HTTP Request contains parameters inside path scope. Body payload unnecessary.";
+                      respSucc = JSON.stringify({ id: "loan_01", borrowerId: "bor_01", borrowerName: "Adebayo Chukwuma", amount: 2500, interestRate: 12, startDate: "2026-05-24T09:30:00Z", dueDate: "2026-08-24T09:30:00Z", amountPaid: 500, latePenalties: 50, status: "Active" }, null, 2);
+                      respErr = JSON.stringify({ error: "Loan instance not found on systems ledger database." }, null, 2);
+                    } else if (docsActiveSec === "ep_recovery_trigger") {
+                      title = "Trigger Automated Digital Dunning Campaign";
+                      methodLabel = "POST";
+                      customUrl = "/api/recovery/trigger";
+                      description = "Initializes collection strategies on delinquent loan listings. Triggers outgoing broadcast alerts (SMS/Email) while updating collector workstation logs.";
+                      parameters = [
+                        { name: "loanId", type: "string", req: "Yes", desc: "Delinquent loan identifier string reference (e.g. 'loan_01')" },
+                        { name: "actionType", type: "string", req: "Yes", desc: "Select from: 'DUNNING_SMS' | 'DUNNING_EMAIL' | 'LEGAL_LETTER'" },
+                        { name: "note", type: "string", req: "No", desc: "Trace notation to map on collections master ledger" },
+                        { name: "agentName", type: "string", req: "No", desc: "Collector or operator tag (defaults to 'AI AutoDUN Agent')" }
+                      ];
+                      reqBody = JSON.stringify({ loanId: "loan_01", actionType: "DUNNING_SMS", note: "Overdue escalation", agentName: "Chinedu Okafor" }, null, 2);
+                      respSucc = JSON.stringify({ success: true, message: "Recovery action pipeline initiated successfully.", actionDetails: { caseId: "case_1720459000", loanId: "loan_01", actionLogged: "DUNNING_SMS", agentAssigned: "Chinedu Okafor", newCaseStage: "Dunning", timestamp: "2026-06-08T10:41:00Z" } }, null, 2);
+                      respErr = JSON.stringify({ error: "Loan instance not found under active records." }, null, 2);
+                    } else if (docsActiveSec === "ep_events") {
+                      title = "Ingest Upstream Integration Events";
+                      methodLabel = "POST";
+                      customUrl = "/api/events";
+                      description = "External API webhook ingest interface to coordinate actions including promise breakages, geofencing changes, or payment successes.";
+                      parameters = [
+                        { name: "eventType", type: "string", req: "Yes", desc: "System namespace command (e.g. 'repayment.success')" },
+                        { name: "payload", type: "object", req: "Yes", desc: "The metadata context properties map" }
+                      ];
+                      reqBody = JSON.stringify({ eventType: "repayment.success", payload: { loanId: "loan_01", amount: 500, reference: "pst_90fa8d7aefec" } }, null, 2);
+                      respSucc = JSON.stringify({ success: true, eventId: "evt_1720459123", eventType: "repayment.success", processed: true, timestamp: "2026-06-08T10:41:00Z", verificationSignature: "a4d3f576be89ce7cf320daef7d3945de" }, null, 2);
+                      respErr = JSON.stringify({ error: "Incomplete event metadata. Properties are mandatory." }, null, 2);
+                    } else if (docsActiveSec === "ep_fraud") {
+                      title = "Geographic Proxy Threat Assessment";
+                      methodLabel = "POST";
+                      customUrl = "/api/fraud/analyze";
+                      description = "Monitors request socket IP references in real-time, calculating VPN hazard layers and identifying geographic login speed limits.";
+                      parameters = [
+                        { name: "borrowerId", type: "string", req: "Yes", desc: "Borrower identity reference trace (e.g. 'bor_01')" },
+                        { name: "ipAddress", type: "string", req: "Yes", desc: "External IP address checked against proxy databases (e.g. '102.89.34.89')" }
+                      ];
+                      reqBody = JSON.stringify({ borrowerId: "bor_01", ipAddress: "102.89.34.89" }, null, 2);
+                      respSucc = JSON.stringify({ success: true, assessmentId: "frd_1720459341", borrowerId: "bor_01", fraudScore: 12, riskRating: "LOW", recommendedAction: "PASS", findings: [], checkedAt: "2026-06-08T10:41:00Z" }, null, 2);
+                      respErr = JSON.stringify({ error: "Validation mismatch. Fields are mandatory." }, null, 2);
+                    } else if (docsActiveSec === "ep_consent_create") {
+                      title = "Establish Electronic Mandate Consent";
+                      methodLabel = "POST";
+                      customUrl = "/api/consent/create";
+                      description = "Registers active Direct Debit consent, legal geographic tracking overlays, or cellular telemetry consent metadata.";
+                      parameters = [
+                        { name: "borrowerId", type: "string", req: "Yes", desc: "Valid borrower ID" },
+                        { name: "consentType", type: "string", req: "Yes", desc: "Command namespace (e.g. 'DIRECT_DEBIT_MANDATE', 'GEOLOCATION')" },
+                        { name: "granted", type: "boolean", req: "Yes", desc: "Affirmative consent indicator toggle (true | false)" }
+                      ];
+                      reqBody = JSON.stringify({ borrowerId: "bor_01", consentType: "DIRECT_DEBIT_MANDATE", granted: true, ipAddress: "102.89.34.15" }, null, 2);
+                      respSucc = JSON.stringify({ success: true, message: "Privacy mandate or direct debit authorization recorded legally.", consentRecord: { id: "con_1720459242", borrowerName: "Adebayo Chukwuma", borrowerId: "bor_01", consentType: "DIRECT_DEBIT_MANDATE", granted: true }, complianceHash: "5fd2b620acdfbfef43accd309e3ca15b0e89fd3c" }, null, 2);
+                      respErr = JSON.stringify({ error: "Required parameters missing. Support fields safely." }, null, 2);
+                    } else if (docsActiveSec === "ep_consent_get") {
+                      title = "Retrieve Consent Status";
+                      methodLabel = "GET";
+                      customUrl = "/api/consent/:borrowerId";
+                      description = "Fetches a full listing of active and revoked consent tokens mapped under a target borrower.";
+                      parameters = [
+                        { name: ":borrowerId", type: "string", req: "Yes (Path)", desc: "Borrower identity reference parameter trace (e.g. 'bor_01')" }
+                      ];
+                      reqBody = "// GET HTTP Request contains parameters inside path scope. Body payload unnecessary.";
+                      respSucc = JSON.stringify({ success: true, borrowerId: "bor_01", activeConsents: [ { id: "con_01", borrowerId: "bor_01", borrowerName: "Adebayo Chukwuma", consentType: "GEO_LOCATION", granted: true, timestamp: "2026-05-28T14:45:00Z" } ], retrievedAt: "2026-06-08T10:41:00Z" }, null, 2);
+                      respErr = JSON.stringify({ success: true, borrowerId: "bor_99", activeConsents: [], retrievedAt: "2026-06-08T10:41:00Z" }, null, 2);
+                    }
+
+                    if (docsActiveSec === 'webhooks') {
+                      return (
+                        <div className="p-8 space-y-6">
+                          <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                            <Activity className="h-5 w-5 text-indigo-650" />
+                            Outgoing Webhooks Documentation
+                          </h3>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                            CredGuard uses outbound HTTP POST hooks to alert your systems about transaction completions, broken promises-to-pay, geofence breaches, and dunning progression thresholds.
+                          </p>
+
+                          <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-850 rounded-xl space-y-2">
+                            <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 mb-1">Format of Incoming Event payload:</h4>
+                            <pre className="text-[11px] font-mono p-3 bg-slate-950 text-emerald-300 rounded-lg overflow-x-auto leading-relaxed shadow">
+{`{
+  "event": "promise.broken",
+  "id": "evt_hook_88aa20ee31",
+  "timestamp": "2026-06-08T10:40:00Z",
+  "payload": {
+    "caseId": "case_01",
+    "borrowerId": "bor_01",
+    "borrowerName": "Adebayo Chukwuma",
+    "promisedAmount": 1500,
+    "promisedDate": "2026-06-05T23:59:59Z",
+    "daysOverdue": 3
+  }
+}`}
+                            </pre>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    if (docsActiveSec === 'sdks') {
+                      return (
+                        <div className="p-8 space-y-6">
+                          <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                            <Smartphone className="h-5 w-5 text-indigo-600" />
+                            Client & Mobile SDK Bindings
+                          </h3>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                            Build rapid integrations inside your mobile bank client wrappers using our streamlined class controllers.
+                          </p>
+
+                          <div className="space-y-4">
+                            <div className="p-4 border border-slate-200 dark:border-slate-850 rounded-xl space-y-2">
+                              <span className="text-[10px] font-bold uppercase tracking-wider bg-indigo-50 dark:bg-indigo-950/20 text-indigo-650 px-2 py-0.5 rounded border border-indigo-150 dark:border-indigo-900/10">ANDROID (KOTLIN)</span>
+                              <pre className="text-[10px] font-mono bg-slate-950 p-3 text-indigo-300 rounded-lg overflow-x-auto">
+{`class CredGuardClient(private val apiToken: String) {
+    private val client = OkHttpClient()
+    private val BASE_URL = "https://ais-dev-g2hlkbu6hmb3svafx5wuhf-50487580477.europe-west2.run.app/api"
+
+    fun emitLocationConsent(borrowerId: String, granted: Boolean, ip: String): String {
+        val mediaType = "application/json".toMediaType()
+        val json = """{"borrowerId":"$borrowerId","consentType":"GEOLOCATION","granted":$granted,"ipAddress":"$ip"}"""
+        val r = Request.Builder()
+            .url("$BASE_URL/consent/create")
+            .post(json.toRequestBody(mediaType))
+            .addHeader("Authorization", "Bearer $apiToken")
+            .build()
+        client.newCall(r).execute().use { return it.body?.string() ?: "" }
+    }
+}`}
+                              </pre>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    if (docsActiveSec === 'postman') {
+                      return (
+                        <div className="p-8 space-y-6">
+                          <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                            <Code className="h-5 w-5 text-indigo-600" />
+                            Postman Environment Setup Guides
+                          </h3>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                            Integrate our full collections inside Postman quickly to give your testing team immediate manual control:
+                          </p>
+
+                          <div className="space-y-3 text-xs text-slate-655 dark:text-slate-400 leading-relaxed">
+                            <p>1. Open Postman Workspace and click <strong>Import</strong> &rarr; <strong>Blank Collection</strong>.</p>
+                            <p>2. Set up Collection Variables:</p>
+                            <ul className="list-disc list-inside space-y-1 font-mono text-[11px] bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border border-slate-150 dark:border-slate-850 block">
+                              <li>baseUrl = "https://ais-dev-g2hlkbu6hmb3svafx5wuhf-50487580477.europe-west2.run.app/api"</li>
+                              <li>token = "{developerKeys?.sandboxKey || "cg_test_5f18d72ae5cf438bb36130636cd4f91d"}"</li>
+                            </ul>
+                            <p>3. Configure Authorization header inheritance matching Bearer Token class with variable <code className="font-mono bg-slate-100 text-[10px] px-1 rounded">{"{{token}}"}</code>.</p>
+                            <p>4. Save and execute transaction queries to debug response arrays visually.</p>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    if (docsActiveSec === 'checklist') {
+                      return (
+                        <div className="p-8 space-y-6 animate-fadeIn">
+                          <div className="space-y-2">
+                            <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                              <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                              Core System Integration & Sign-off Checklist
+                            </h3>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
+                              Instruct your banking IT division to complete this checklist and confirm that return parameters match expectation schema before launching production modules safely.
+                            </p>
+                          </div>
+
+                          <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-sm">
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-left text-xs bg-white dark:bg-slate-950 text-slate-600 dark:text-slate-400 min-w-[650px]">
+                                <thead className="bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-350 font-bold border-b border-slate-200 dark:border-slate-850">
+                                  <tr>
+                                    <th className="p-3 text-center">Seq</th>
+                                    <th className="p-3">Interface / Endpoint</th>
+                                    <th className="p-3">Test Scenario Payload</th>
+                                    <th className="p-3 text-center">Status</th>
+                                    <th className="p-3">Expected Result Code & Parameter</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-150 dark:divide-slate-850">
+                                  {[
+                                    { seq: "01", ep: "POST /borrowers", payload: `{"name":"Sarah", "email":"sarah@gmail.com"}`, code: "211 Created", field: `"id" of profile (starts with "bor_")` },
+                                    { seq: "02", ep: "GET /borrowers/:id", payload: `Path segment: "bor_01" inside URI`, code: "200 OK", field: `Profile object with matching "email"` },
+                                    { seq: "03", ep: "POST /risk/score", payload: `{"borrowerId":"bor_01"}`, code: "200 OK", field: `"riskBand" matching ("LOW"|"HIGH"|"CRITICAL")` },
+                                    { seq: "04", ep: "POST /loans", payload: `{"borrowerId":"bor_01", "amount": 2500}`, code: "211 Created", field: `Amortized installments containing dates & segments` },
+                                    { seq: "05", ep: "GET /loans/:id", payload: `Path segment: "loan_01" inside URI`, code: "200 OK", field: `Running loan object with active status` },
+                                    { seq: "06", ep: "POST /recovery/trigger", payload: `{"loanId":"loan_01", "actionType":"DUNNING_SMS"}`, code: "200 OK", field: `"newCaseStage": "Dunning"` },
+                                    { seq: "07", ep: "POST /events", payload: `{"eventType":"repayment.success", "payload": {}}`, code: "200 OK", field: `"processed": true and active SHA256 "verificationSignature"` },
+                                    { seq: "08", ep: "POST /fraud/analyze", payload: `{"borrowerId":"bor_01", "ipAddress":"45.90.1.2"}`, code: "200 OK", field: `Returns VPN findings, "riskRating" and actions` },
+                                    { seq: "09", ep: "POST /consent/create", payload: `{"borrowerId":"bor_01", "consentType":"GEO", "granted":true}`, code: "211 Created", field: `Output containing SHA1 "complianceHash"` },
+                                    { seq: "10", ep: "GET /consent/:id", payload: `Path segment: "bor_01" inside URI`, code: "200 OK", field: `Active consents array list` }
+                                  ].map((item, idx) => (
+                                    <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30">
+                                      <td className="p-3 text-center font-bold text-slate-400">{item.seq}</td>
+                                      <td className="p-3 font-mono font-bold text-slate-800 dark:text-slate-200 text-[11px]">{item.ep}</td>
+                                      <td className="p-3 font-mono text-[10px] max-w-[140px] truncate" title={item.payload}>{item.payload}</td>
+                                      <td className="p-3 text-center font-semibold text-emerald-600 font-mono text-[11px]">{item.code}</td>
+                                      <td className="p-3 font-sans text-slate-500 dark:text-slate-400 text-[11px]">{item.field}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // Standard Endpoint Ref Sheet
+                    return (
+                      <div className="flex flex-col flex-1 divide-y divide-slate-100 dark:divide-slate-800 animate-fadeIn">
+                        {/* Header Details */}
+                        <div className="p-6 md:p-8 space-y-4">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <h3 className="text-base md:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
+                              {title}
+                            </h3>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(`https://ais-dev-g2hlkbu6hmb3svafx5wuhf-50487580477.europe-west2.run.app${customUrl}`);
+                                alert("Endpoint URL copied!");
+                              }}
+                              className="font-mono text-[10.5px] bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100 dark:bg-slate-950 dark:text-slate-400 dark:border-slate-800 dark:hover:bg-slate-800 py-1.5 px-3 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
+                            >
+                              <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded ${
+                                methodLabel === 'POST' ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/65 dark:text-amber-400' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/65 dark:text-emerald-400'
+                              }`}>{methodLabel}</span>
+                              <span className="font-semibold select-all">https://...{customUrl}</span>
+                              <Copy className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+
+                          <p className="text-xs text-slate-505 dark:text-slate-400 leading-relaxed font-sans">{description}</p>
+                        </div>
+
+                        {/* Split specifications Pane */}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 flex-1 divide-y lg:divide-y-0 lg:divide-x divide-slate-100 dark:divide-slate-800">
+                          {/* Inner LHS: Headers and Parameters */}
+                          <div className="p-6 md:p-8 space-y-6">
+                            <div className="space-y-3">
+                              <h4 className="text-xs font-black uppercase tracking-wider text-slate-450 dark:text-slate-550">Required Headers</h4>
+                              <div className="border border-slate-150 dark:border-slate-800 rounded-xl overflow-hidden shadow-sm">
+                                <table className="w-full text-left text-xs bg-white dark:bg-slate-950 text-slate-600 dark:text-slate-400">
+                                  <tbody className="divide-y divide-slate-100 dark:divide-slate-850">
+                                    {requiredHeaders.map((head, i) => (
+                                      <tr key={i} className="align-middle">
+                                        <td className="p-3 font-mono font-bold text-slate-800 dark:text-slate-250 border-r border-slate-100 dark:border-slate-850">{head.key}</td>
+                                        <td className="p-3">
+                                          <div className="font-mono text-[10px] break-all select-all font-semibold bg-slate-50/50 dark:bg-slate-900 border border-slate-100 dark:border-slate-850 px-1 py-0.5 rounded leading-normal text-indigo-650 dark:text-indigo-400">{head.val}</div>
+                                          <div className="text-[10px] text-slate-400 mt-0.5">{head.desc}</div>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+
+                            <div className="space-y-3">
+                              <h4 className="text-xs font-black uppercase tracking-wider text-slate-450 dark:text-slate-550">Parameters Specification</h4>
+                              {parameters.length > 0 ? (
+                                <div className="border border-slate-150 dark:border-slate-805 rounded-xl overflow-hidden shadow-sm">
+                                  <table className="w-full text-left text-xs bg-white dark:bg-slate-950">
+                                    <thead className="bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-350 font-semibold border-b border-slate-150 dark:border-slate-855">
+                                      <tr>
+                                        <th className="p-2.5">Name</th>
+                                        <th className="p-2.5">Type & Auth</th>
+                                        <th className="p-2.5">Description</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100 dark:divide-slate-850 text-slate-650 dark:text-slate-450">
+                                      {parameters.map((param, i) => (
+                                        <tr key={i} className="align-top">
+                                          <td className="p-2.5 font-mono font-bold text-slate-800 dark:text-white text-[11px]">{param.name}</td>
+                                          <td className="p-2.5">
+                                            <span className="font-mono text-[10px] text-slate-450 block mb-0.5">{param.type}</span>
+                                            <span className={`text-[8.5px] font-black uppercase px-1 rounded ${param.req === 'Yes' || param.req.includes('Yes') ? 'bg-red-50 text-red-600 dark:bg-red-950/20 dark:text-red-400' : 'bg-slate-100 text-slate-500 dark:bg-slate-800'}`}>{param.req === 'Yes' ? 'Required' : 'Optional'}</span>
+                                          </td>
+                                          <td className="p-2.5 text-[10px] leading-relaxed text-slate-500 dark:text-slate-400">{param.desc}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              ) : (
+                                <p className="text-[11px] text-slate-400 italic">No parameters required for this endpoint.</p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Inner RHS: Code Payload & Expected Responses */}
+                          <div className="p-6 md:p-8 bg-slate-50/50 dark:bg-slate-950/20 space-y-5 flex flex-col justify-start">
+                            <div className="space-y-1.5">
+                              <div className="flex justify-between items-center">
+                                <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-550">Sample Request Body payload</h4>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(reqBody);
+                                    alert("Request payload copied!");
+                                  }}
+                                  className="text-slate-400 hover:text-indigo-650 flex items-center gap-1 text-[10px] cursor-pointer"
+                                >
+                                  <Copy className="h-3 w-3" />
+                                  <span>Copy</span>
+                                </button>
+                              </div>
+                              <pre className="text-[11px] font-mono leading-relaxed p-4 bg-slate-950 text-indigo-250 rounded-xl overflow-x-auto shadow-inner max-h-[180px]">
+                                {reqBody}
+                              </pre>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <div className="flex justify-between items-center">
+                                <h4 className="text-[10px] font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Expected Success Response (200 / 201)</h4>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(respSucc);
+                                    alert("Success response copied!");
+                                  }}
+                                  className="text-slate-400 hover:text-indigo-655 flex items-center gap-1 text-[10px] cursor-pointer"
+                                >
+                                  <Copy className="h-3 w-3" />
+                                  <span>Copy</span>
+                                </button>
+                              </div>
+                              <pre className="text-[11px] font-mono leading-relaxed p-4 bg-slate-950 text-emerald-300 rounded-xl overflow-x-auto shadow-inner max-h-[180px]">
+                                {respSucc}
+                              </pre>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <div className="flex justify-between items-center">
+                                <h4 className="text-[10px] font-black uppercase tracking-wider text-rose-500 dark:text-rose-400">Sample Error Response (400 / 404)</h4>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(respErr);
+                                    alert("Error response copied!");
+                                  }}
+                                  className="text-slate-400 hover:text-indigo-655 flex items-center gap-1.5 text-[10px] cursor-pointer"
+                                >
+                                  <Copy className="h-3 w-3" />
+                                  <span>Copy</span>
+                                </button>
+                              </div>
+                              <pre className="text-[11px] font-mono leading-relaxed p-4 bg-slate-950 text-rose-450 rounded-xl overflow-x-auto shadow-inner max-h-[120px]">
+                                {respErr}
+                              </pre>
+                            </div>
+                          </div>
+
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -5143,7 +7722,7 @@ export default function App() {
                       type="button"
                       onClick={() => {
                         setShowRenewalModal(false);
-                        navigateTo('/license-admin');
+                        navigateTo('/admin');
                       }}
                       className="inline-flex items-center space-x-2 text-xs font-black text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer font-sans"
                     >

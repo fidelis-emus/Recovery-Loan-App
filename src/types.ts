@@ -16,6 +16,7 @@ export interface Borrower {
     phone: string;
   }[];
   createdAt: string;
+  payoutConsistency?: number;
 }
 
 export interface Loan {
@@ -104,6 +105,7 @@ export interface RecoveryCase {
   borrowerId: string;
   borrowerName: string;
   overdueAmount: number;
+  outstandingBalance?: number;
   daysOverdue: number;
   assignedAgent: string;
   promiseToPayHistory: PromiseToPay[];

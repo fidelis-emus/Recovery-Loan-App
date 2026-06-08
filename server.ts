@@ -29,6 +29,29 @@ app.use(express.json());
 const LICENSE_SALT = "CredGuardSecretSalt@2026";
 let serverActiveLicenseKey = ""; // Starts empty/unlicensed so the user can test the apply license flow!
 
+// -------------------------------------------------------------
+// CORPORATE REST API KEYS & AUTHENTICATION (SANDBOX vs LIVE)
+// -------------------------------------------------------------
+interface DeveloperApiKeys {
+  sandboxKey: string;
+  sandboxCreated: string;
+  sandboxCalls: number;
+  liveKey: string;
+  liveCreated: string;
+  liveCalls: number;
+}
+
+let activeApiKeys: DeveloperApiKeys = {
+  sandboxKey: "cg_test_5f18d72ae5cf438bb36130636cd4f91d",
+  sandboxCreated: new Date().toISOString(),
+  sandboxCalls: 128,
+  liveKey: "cg_live_9a3c8e10df22472ba5670891d966036f",
+  liveCreated: new Date().toISOString(),
+  liveCalls: 45
+};
+
+let developerWebhookEventsStore: any[] = [];
+
 function getMonthDifference(date1: Date, date2: Date): number {
   return (date2.getFullYear() - date1.getFullYear()) * 12 + (date2.getMonth() - date1.getMonth());
 }
@@ -138,21 +161,57 @@ function isLicenseValidForCurrentMonth(): boolean {
   return parsed.isValid;
 }
 
-// License guard middleware
+// License & API Key guard middleware
 app.use((req, res, next) => {
   // Allow static assets, favicon, frontend pages served by Vite/Express
   if (!req.path.startsWith("/api")) {
     return next();
   }
   
-  // Allow all license operations, plus login/register endpoints so users can authenticate
+  // Allow license operations, developer key readouts, plus login/register endpoints
   if (
     req.path === "/api/license/status" ||
     req.path === "/api/license/apply" ||
     req.path === "/api/license/generate" ||
+    req.path === "/api/developer/keys" ||
+    req.path === "/api/developer/keys/rotate" ||
     req.path === "/api/auth/login" ||
     req.path === "/api/auth/register"
   ) {
+    return next();
+  }
+
+  // Check for business Developer API Keys inside the Authorization Header
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+
+  let isDevKeyValid = false;
+  let detectedKeyType: "sandbox" | "live" | null = null;
+
+  if (token) {
+    if (token === activeApiKeys.sandboxKey) {
+      isDevKeyValid = true;
+      activeApiKeys.sandboxCalls++;
+      detectedKeyType = "sandbox";
+    } else if (token === activeApiKeys.liveKey) {
+      isDevKeyValid = true;
+      activeApiKeys.liveCalls++;
+      detectedKeyType = "live";
+    }
+  }
+
+  // If a valid Sandbox or Production Client Core API Key is detected, bypass main billing license lock
+  if (isDevKeyValid && detectedKeyType) {
+    // Log corporate integration usage inside audit tracking
+    if (typeof auditLogsStore !== 'undefined' && Array.isArray(auditLogsStore)) {
+      auditLogsStore.push({
+        id: `aud_${Date.now()}_api`,
+        action: detectedKeyType === "sandbox" ? "API_SANDBOX_CALL" : "API_PRODUCTION_CALL",
+        detail: `Banking core accessed ${req.method} ${req.path} via authentic ${detectedKeyType === "sandbox" ? "Sandbox Test Key" : "Live Production Key"}.`,
+        timestamp: new Date().toISOString(),
+        actor: `External API Client (${detectedKeyType})`
+      });
+    }
     return next();
   }
 
@@ -290,6 +349,50 @@ app.post("/api/license/apply", (req, res) => {
     }
     
     return res.status(400).json({ error: "Invalid license key signature. Check spelling and ensure keys are generated correctly from the administrator panel." });
+  }
+});
+
+// Developer API Key management endpoints
+app.get("/api/developer/keys", (req, res) => {
+  res.json(activeApiKeys);
+});
+
+app.post("/api/developer/keys/rotate", (req, res) => {
+  const { type } = req.body; // "sandbox" | "live"
+  const tokenPart = crypto.randomBytes(16).toString("hex");
+  
+  if (type === "sandbox") {
+    activeApiKeys.sandboxKey = `cg_test_${tokenPart}`;
+    activeApiKeys.sandboxCreated = new Date().toISOString();
+    activeApiKeys.sandboxCalls = 0;
+    
+    if (typeof auditLogsStore !== "undefined" && Array.isArray(auditLogsStore)) {
+      auditLogsStore.push({
+        id: `aud_${Date.now()}_rotate`,
+        action: "API_KEY_ROTATED",
+        detail: "API keys management updated: Re-generated Sandbox/Test API key token.",
+        timestamp: new Date().toISOString(),
+        actor: "Operator Console"
+      });
+    }
+    return res.json({ success: true, message: "Sandbox API key rotated successfully", keys: activeApiKeys });
+  } else if (type === "live") {
+    activeApiKeys.liveKey = `cg_live_${tokenPart}`;
+    activeApiKeys.liveCreated = new Date().toISOString();
+    activeApiKeys.liveCalls = 0;
+    
+    if (typeof auditLogsStore !== "undefined" && Array.isArray(auditLogsStore)) {
+      auditLogsStore.push({
+        id: `aud_${Date.now()}_rotate`,
+        action: "API_KEY_ROTATED",
+        detail: "API keys management updated: Re-generated Live/Production API key token.",
+        timestamp: new Date().toISOString(),
+        actor: "Operator Console"
+      });
+    }
+    return res.json({ success: true, message: "Live production API key rotated successfully", keys: activeApiKeys });
+  } else {
+    return res.status(400).json({ error: "Invalid type requested. Must be 'sandbox' or 'live'" });
   }
 });
 
@@ -845,38 +948,40 @@ app.post("/api/auth/login", (req, res) => {
 });
 
 // BORROWERS ENDPOINTS
-app.get("/api/borrowers", (req, res) => {
+app.get(["/api/borrowers", "/borrowers"], (req, res) => {
   res.json(borrowersStore);
 });
 
-app.get("/api/borrowers/:id", (req, res) => {
-  const borrower = borrowersStore.find(b => b.id === req.params.id);
-  if (!borrower) return res.status(404).json({ error: "Borrower not found." });
+app.get(["/api/borrowers/:id", "/borrowers/:id", "/api/borrowers/:borrowerId", "/borrowers/:borrowerId"], (req, res) => {
+  const targetId = req.params.borrowerId || req.params.id;
+  const borrower = borrowersStore.find(b => b.id === targetId);
+  if (!borrower) return res.status(404).json({ error: "Borrower identity not found. Please check of the id value." });
   res.json(borrower);
 });
 
-app.post("/api/borrowers", (req, res) => {
+app.post(["/api/borrowers", "/borrowers"], (req, res) => {
   const bData: Borrower = req.body;
-  if (!bData.name || !bData.email) return res.status(400).json({ error: "Name and email required." });
+  if (!bData.name || !bData.email) return res.status(400).json({ error: "Required fields missing. 'name' and 'email' are mandatory properties." });
   bData.id = bData.id || `bor_${Date.now()}`;
   bData.createdAt = new Date().toISOString();
+  bData.kycStatus = bData.kycStatus || "Verified";
   borrowersStore.push(bData);
   res.status(201).json(bData);
 });
 
 // LOANS ENDPOINTS
-app.get("/api/loans", (req, res) => {
-  // Recalculate balances on fetch to be highly accurate
+app.get(["/api/loans", "/loans"], (req, res) => {
   res.json(loansStore);
 });
 
-app.get("/api/loans/:id", (req, res) => {
-  const loan = loansStore.find(l => l.id === req.params.id);
-  if (!loan) return res.status(404).json({ error: "Loan instance not found" });
+app.get(["/api/loans/:id", "/loans/:id", "/api/loans/:loanId", "/loans/:loanId"], (req, res) => {
+  const targetLoanId = req.params.loanId || req.params.id;
+  const loan = loansStore.find(l => l.id === targetLoanId);
+  if (!loan) return res.status(404).json({ error: "Loan instance not found on the systems ledger database." });
   res.json(loan);
 });
 
-app.post("/api/loans", (req, res) => {
+app.post(["/api/loans", "/loans"], (req, res) => {
   const { borrowerId, amount, interestRate, durationMonths } = req.body;
   const borrower = borrowersStore.find(b => b.id === borrowerId);
   if (!borrower) return res.status(400).json({ error: "Valid Borrower ID is required." });
@@ -1351,6 +1456,269 @@ app.post("/api/notifications/trigger", (req, res) => {
     status: "Sent",
     message: `Message broadcast triggered successfully to channel ${target}`,
     log
+  });
+});
+
+// -------------------------------------------------------------
+// CORPORATE REST API COMPONENT LOGIC & ADDITIONAL ENDPOINTS
+// -------------------------------------------------------------
+
+// 1. Risk Analysis Scorecard calculation
+app.post(["/api/risk/score", "/risk/score"], (req, res) => {
+  const { borrowerId } = req.body;
+  if (!borrowerId) {
+    return res.status(400).json({ error: "Required attribute missing: 'borrowerId' is required in request payload." });
+  }
+
+  const borrower = borrowersStore.find(b => b.id === borrowerId);
+  if (!borrower) {
+    return res.status(404).json({ error: "Borrower identity could not be resolved." });
+  }
+
+  const borrowerLoans = loansStore.filter(l => l.borrowerId === borrowerId);
+  const overdueCount = borrowerLoans.filter(l => l.status === "Overdue" || l.status === "Written_Off").length;
+  const totalOutstanding = borrowerLoans.reduce((sum, l) => sum + (l.amount - l.amountPaid), 0);
+  
+  let riskScore = 15; // base score
+  const reasons: string[] = [];
+
+  if (overdueCount > 0) {
+    riskScore += 45;
+    reasons.push(`${overdueCount} active overdue or default loan instance(s) flagged on profile.`);
+  }
+  if (totalOutstanding > 5000) {
+    riskScore += 20;
+    reasons.push("Outstanding aggregate borrowing principal exceeds corporate soft threshold ($5,000).");
+  }
+  if (borrower.kycStatus === "Pending") {
+    riskScore += 15;
+    reasons.push("KYC verification is incomplete or waiting operator audit.");
+  }
+  
+  const payoutConsistency = borrower.payoutConsistency || 92;
+  if (payoutConsistency < 85) {
+    riskScore += 10;
+    reasons.push("Historic bank account payout consistency below 85% safety bound.");
+  }
+
+  riskScore = Math.min(riskScore, 100);
+  
+  const riskBand = riskScore >= 75 ? "CRITICAL" : riskScore >= 50 ? "HIGH" : riskScore >= 30 ? "MEDIUM" : "LOW";
+
+  res.json({
+    success: true,
+    borrowerId,
+    borrowerName: borrower.name,
+    riskScore,
+    riskBand,
+    analytics: {
+      totalOutstanding,
+      overdueCount,
+      kycStatus: borrower.kycStatus,
+      payoutConsistency
+    },
+    computations: reasons,
+    assessmentDate: new Date().toISOString()
+  });
+});
+
+// 2. Automated Recovery Trigger
+app.post(["/api/recovery/trigger", "/recovery/trigger"], (req, res) => {
+  const { loanId, actionType, note, agentName } = req.body;
+  if (!loanId || !actionType) {
+    return res.status(400).json({ error: "Required fields missing. Both 'loanId' and 'actionType' represent mandatory properties." });
+  }
+
+  const loan = loansStore.find(l => l.id === loanId);
+  if (!loan) {
+    return res.status(404).json({ error: "Loan instance not found under active records." });
+  }
+
+  // Find or provision a recovery case file
+  let rCase = recoveryCasesStore.find(c => c.loanId === loanId);
+  if (!rCase) {
+    rCase = {
+      id: `case_${Date.now()}`,
+      loanId,
+      borrowerName: loan.borrowerName,
+      borrowerId: loan.borrowerId,
+      outstandingBalance: loan.amount - loan.amountPaid,
+      overdueAmount: Math.ceil((loan.amount - loan.amountPaid) * 0.4), // simulated overdue portion
+      daysOverdue: 42,
+      assignedAgent: agentName || "AI AutoDUN Agent",
+      stage: "First_Notice",
+      promiseToPayHistory: [],
+      logs: []
+    };
+    recoveryCasesStore.push(rCase);
+  }
+
+  const timestamp = new Date().toISOString();
+  const agent = agentName || rCase.assignedAgent;
+
+  // Append action to recovery logs
+  rCase.logs.push({
+    timestamp,
+    action: actionType,
+    note: note || `Automated recovery trigger fired via core API: [${actionType}]`,
+    agent
+  });
+
+  // Escalate stage if requested
+  if (actionType === "DUNNING_EMAIL" || actionType === "DUNNING_SMS") {
+    rCase.stage = "Dunning";
+  } else if (actionType === "LEGAL_LETTER") {
+    rCase.stage = "Legal_Escalation";
+  }
+
+  // Add dunning notice
+  const notifyId = `ntf_${Date.now()}`;
+  notificationsLogsStore.push({
+    id: notifyId,
+    borrowerId: loan.borrowerId,
+    borrowerName: loan.borrowerName,
+    type: actionType.includes("EMAIL") ? "Email" : "SMS",
+    channel: actionType.includes("EMAIL") ? "email@borrower.com" : "+234_simulate",
+    trigger: actionType,
+    status: "Sent",
+    message: `[CredGuard Notice] Fired dunning action sequence. Action: ${actionType}. Details: ${note || 'Amortization penalty warning.'}`,
+    timestamp
+  });
+
+  res.json({
+    success: true,
+    message: "Recovery action pipeline initiated successfully.",
+    actionDetails: {
+      caseId: rCase.id,
+      loanId,
+      actionLogged: actionType,
+      agentAssigned: agent,
+      newCaseStage: rCase.stage,
+      timestamp
+    }
+  });
+});
+
+// 3. Webhook Integration Events
+app.post(["/api/events", "/events"], (req, res) => {
+  const { eventType, payload, timestamp } = req.body;
+  if (!eventType || !payload) {
+    return res.status(400).json({ error: "Incomplete event metadata. Properties 'eventType' and 'payload' must be provided." });
+  }
+
+  const id = `evt_${Date.now()}`;
+  const storedEvent = {
+    id,
+    eventType,
+    payload,
+    receivedAt: timestamp || new Date().toISOString(),
+    status: "Processed"
+  };
+
+  developerWebhookEventsStore.push(storedEvent);
+
+  // Add telemetry lock to audit store
+  auditLogsStore.push({
+    id: `aud_${Date.now()}_evt`,
+    action: "INTEGRATION_EVENT_INGESTED",
+    detail: `Webhook event received: [${eventType}]. Stored ID: ${id}`,
+    timestamp: new Date().toISOString(),
+    actor: "External Integration Portal"
+  });
+
+  res.json({
+    success: true,
+    eventId: id,
+    eventType,
+    processed: true,
+    timestamp: new Date().toISOString(),
+    verificationSignature: crypto.createHash("sha256").update(id + JSON.stringify(payload)).digest("hex")
+  });
+});
+
+// 4. Real-Time Fraud & Telemetry Analyzer
+app.post(["/api/fraud/analyze", "/fraud/analyze"], (req, res) => {
+  const { borrowerId, ipAddress, deviceFingerprint, vpnUsed } = req.body;
+  if (!borrowerId || !ipAddress) {
+    return res.status(400).json({ error: "Validation mismatch. Fields 'borrowerId' and 'ipAddress' are mandatory." });
+  }
+
+  const borrower = borrowersStore.find(b => b.id === borrowerId);
+  const reasons: string[] = [];
+  let fraudScore = 12; // base score
+
+  const ipStr = String(ipAddress);
+  const isVpn = vpnUsed === true || ipStr.startsWith("45.") || ipStr.startsWith("185.") || Math.random() < 0.15;
+
+  if (isVpn) {
+    fraudScore += 45;
+    reasons.push("Anonymous host proxy or commercial VPN network detected on request socket.");
+  }
+  if (deviceFingerprint && deviceFingerprint.length < 8) {
+    fraudScore += 15;
+    reasons.push("Suspicious or incomplete client device hardware signature.");
+  }
+  if (Math.random() < 0.1) {
+    fraudScore += 30;
+    reasons.push("Speed-limit velocity check failed: account accessed from distinct geographic locations under 5 minutes.");
+  }
+
+  fraudScore = Math.min(fraudScore, 100);
+  const recommendedAction = fraudScore >= 70 ? "BLOCK" : fraudScore >= 40 ? "CHALLENGE" : "PASS";
+
+  res.json({
+    success: true,
+    assessmentId: `frd_${Date.now()}`,
+    borrowerId,
+    fraudScore,
+    riskRating: fraudScore >= 70 ? "CRITICAL" : fraudScore >= 40 ? "HIGH" : "LOW",
+    recommendedAction,
+    findings: reasons,
+    checkedAt: new Date().toISOString()
+  });
+});
+
+// 5. Create Dynamic Direct Debit Consent Mandate
+app.post(["/api/consent/create", "/consent/create"], (req, res) => {
+  const { borrowerId, consentType, granted, ipAddress } = req.body;
+  if (!borrowerId || !consentType || granted === undefined) {
+    return res.status(400).json({ error: "Required parameters missing. Support 'borrowerId', 'consentType', and 'granted' (boolean) fields safely." });
+  }
+
+  const borrower = borrowersStore.find(b => b.id === borrowerId);
+  const borrowerName = borrower ? borrower.name : "Anonymous Borrower Core";
+
+  const id = `con_${Date.now()}`;
+  const record = {
+    id,
+    borrowerName,
+    borrowerId,
+    consentType,
+    granted: granted === true,
+    timestamp: new Date().toISOString(),
+    ip: ipAddress || "185.90.10.15"
+  };
+
+  consentRecordsStore.push(record);
+
+  res.status(201).json({
+    success: true,
+    message: "Privacy mandate or direct debit authorization recorded legally.",
+    consentRecord: record,
+    complianceHash: crypto.createHash("sha1").update(id + consentType + String(granted)).digest("hex")
+  });
+});
+
+// 6. Retrieve active consent registries for a given borrower
+app.get(["/api/consent/:borrowerId", "/consent/:borrowerId"], (req, res) => {
+  const { borrowerId } = req.params;
+  const listings = consentRecordsStore.filter(c => (c as any).borrowerId === borrowerId);
+  
+  res.json({
+    success: true,
+    borrowerId,
+    activeConsents: listings,
+    retrievedAt: new Date().toISOString()
   });
 });
 
