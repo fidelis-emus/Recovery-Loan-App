@@ -205,7 +205,14 @@ export default function App() {
   // CREDGUARD MONTHLY LICENSING LOGIC & ACTIVATION STATES
   // -------------------------------------------------------------
   const [currentPath, setCurrentPath] = useState(() => {
-    if (VITE_APP_MODE === 'admin' || window.location.pathname === '/admin') {
+    if (VITE_APP_MODE === 'admin') {
+      return '/admin';
+    }
+    if (VITE_APP_MODE === 'app' && window.location.pathname === '/admin') {
+      window.history.replaceState(null, '', '/');
+      return '/';
+    }
+    if (window.location.pathname === '/admin') {
       return '/admin';
     }
     return window.location.pathname;
@@ -213,7 +220,12 @@ export default function App() {
 
   useEffect(() => {
     const handlePopState = () => {
-      if (VITE_APP_MODE === 'admin' || window.location.pathname === '/admin') {
+      if (VITE_APP_MODE === 'admin') {
+        setCurrentPath('/admin');
+      } else if (VITE_APP_MODE === 'app' && window.location.pathname === '/admin') {
+        window.history.replaceState(null, '', '/');
+        setCurrentPath('/');
+      } else if (window.location.pathname === '/admin') {
         setCurrentPath('/admin');
       } else {
         setCurrentPath(window.location.pathname);
