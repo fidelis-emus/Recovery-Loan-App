@@ -58,15 +58,7 @@ import { Borrower, Loan, Payment, UserSession, RiskAlert, RecoveryCase, Notifica
 import { SDK_TEMPLATES } from './utils/sdkTemplates';
 import { TravelMap } from './components/TravelMap';
 
-const isProductionDomain = typeof window !== 'undefined' && 
-  window.location.hostname !== 'localhost' && 
-  window.location.hostname !== '127.0.0.1' && 
-  !window.location.hostname.includes('ais-dev') && 
-  !window.location.hostname.includes('ais-pre');
-
-const VITE_APP_MODE = (isProductionDomain && !((import.meta as any).env?.VITE_APP_MODE)) 
-  ? 'app' 
-  : (((import.meta as any).env?.VITE_APP_MODE || 'both') as string).toLowerCase();
+const VITE_APP_MODE = (((import.meta as any).env?.VITE_APP_MODE || 'both') as string).toLowerCase();
 
 const VITE_ADMIN_PORTAL_URL = ((import.meta as any).env?.VITE_ADMIN_PORTAL_URL || '') as string;
 
