@@ -58,7 +58,16 @@ import { Borrower, Loan, Payment, UserSession, RiskAlert, RecoveryCase, Notifica
 import { SDK_TEMPLATES } from './utils/sdkTemplates';
 import { TravelMap } from './components/TravelMap';
 
-const VITE_APP_MODE = (((import.meta as any).env?.VITE_APP_MODE || 'both') as string).toLowerCase();
+const isProductionDomain = typeof window !== 'undefined' && 
+  window.location.hostname !== 'localhost' && 
+  window.location.hostname !== '127.0.0.1' && 
+  !window.location.hostname.includes('ais-dev') && 
+  !window.location.hostname.includes('ais-pre');
+
+const VITE_APP_MODE = (isProductionDomain && !((import.meta as any).env?.VITE_APP_MODE)) 
+  ? 'app' 
+  : (((import.meta as any).env?.VITE_APP_MODE || 'both') as string).toLowerCase();
+
 const VITE_ADMIN_PORTAL_URL = ((import.meta as any).env?.VITE_ADMIN_PORTAL_URL || '') as string;
 
 export default function App() {
@@ -2853,45 +2862,10 @@ export default function App() {
               </button>
             </form>
 
-            {currentUser?.role === 'Operator' && (
-              <div className="pt-4 border-t border-slate-100 dark:border-slate-800 text-center space-y-3">
-                {VITE_APP_MODE === 'app' ? (
-                  VITE_ADMIN_PORTAL_URL ? (
-                    <a
-                      href={VITE_ADMIN_PORTAL_URL}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center space-x-2 text-xs font-black text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer font-sans"
-                    >
-                      <Shield className="h-4 w-4" />
-                      <span>Go to Standalone Admin Portal &rarr;</span>
-                    </a>
-                  ) : (
-                    <div className="p-3 bg-slate-50 dark:bg-slate-950/40 rounded-xl border border-slate-100 dark:border-slate-800/80 text-left font-sans text-[10px] text-slate-500 space-y-1">
-                      <span className="font-bold text-slate-700 dark:text-slate-300 block">🔑 Isolated Admin Portal Hosted Separately</span>
-                      <p>Activate licenses locally using the form above. Set the <code className="bg-slate-100 dark:bg-slate-900 px-1 rounded text-red-500 font-bold">VITE_ADMIN_PORTAL_URL</code> environment variable to link your standalone administrator portal.</p>
-                    </div>
-                  )
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigateTo('/admin');
-                    }}
-                    className="inline-flex items-center space-x-2 text-xs font-black text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer font-sans border-none bg-transparent"
-                  >
-                    <Shield className="h-4 w-4" />
-                    <span>Open Standalone Admin Portal &rarr;</span>
-                  </button>
-                )}
-              </div>
-            )}
-
             <div className="bg-slate-50 dark:bg-slate-950/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800/80 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400 space-y-1 font-sans">
               <span className="font-bold text-slate-700 dark:text-slate-300 block mb-1">🔑 Subscription Licensing Rules</span>
               <p>• Licenses can be activated for Monthly, Quarterly, Bi-Annually, or Annually subscription terms.</p>
               <p>• The current host month demands a key matching: <span className="font-mono text-xs text-indigo-600 dark:text-indigo-400">{licenseStatus.requiredFormat}</span></p>
-              <p>• To generate new subscription keys, sign in to the separate Admin Portal.</p>
             </div>
           </div>
         </div>
@@ -7634,7 +7608,7 @@ export default function App() {
                 </button>
               </form>
 
-              {currentUser?.role === 'Operator' && (
+              {VITE_APP_MODE !== 'app' && currentUser?.role === 'Operator' && (
                 <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-center">
                   {VITE_APP_MODE === 'app' ? (
                     VITE_ADMIN_PORTAL_URL ? (
@@ -7672,7 +7646,7 @@ export default function App() {
               <div className="bg-slate-50 dark:bg-slate-950/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800/80 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400 space-y-1 font-sans text-left">
                 <span className="font-bold text-slate-700 dark:text-slate-300 block mb-1">🔑 Subscription Licensing Rules</span>
                 <p>• Licenses can be activated for Monthly, Quarterly, Bi-Annually, or Annually subscription terms.</p>
-                <p>• To generate new subscription keys, sign in to the separate Admin Portal.</p>
+                {VITE_APP_MODE !== 'app' && <p>• To generate new subscription keys, sign in to the separate Admin Portal.</p>}
               </div>
             </div>
           </div>
