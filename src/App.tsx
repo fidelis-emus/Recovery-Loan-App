@@ -65,8 +65,6 @@ export default function App() {
   // Navigation Tabs
   const [activeTab, setActiveTab ] = useState<'analytics' | 'borrowers' | 'loans' | 'recovery' | 'audits' | 'sdks' | 'database'>('analytics');
 
-  // Subdomain Portal Simulation Selector
-  const [selectedDomain, setSelectedDomain] = useState<'app.credguard.com' | 'admin.credguard.com'>('app.credguard.com');
   const [simulatedIp, setSimulatedIp] = useState<string>('198.162.24.11'); // Default whitelisted HQ IP
   const [adminMfaCode, setAdminMfaCode] = useState<string>('');
   const [isMfaPassed, setIsMfaPassed] = useState<boolean>(false);
@@ -77,7 +75,7 @@ export default function App() {
   const [simulatedMfaOtp, setSimulatedMfaOtp] = useState<string>('518420');
   const [selectedAdminSubTab, setSelectedAdminSubTab] = useState<'generators' | 'tenants' | 'billing' | 'usage' | 'health' | 'audits' | 'vault' | 'architect'>('generators');
   const [lastAuditLogs, setLastAuditLogs] = useState<Array<{ timestamp: string; action: string; details: string; operator: string; status: 'SUCCESS' | 'WARN' | 'BLOCKED' | 'PENDING' }>>([
-    { timestamp: new Date().toISOString().substring(0, 16), action: 'System Provisioned', details: 'Client app.credguard.com and central admin.credguard.com initial handshake secure.', operator: 'SYSTEM', status: 'SUCCESS' },
+    { timestamp: new Date().toISOString().substring(0, 16), action: 'System Provisioned', details: 'Client Workspace and isolated Admin Portal initial handshake secure.', operator: 'SYSTEM', status: 'SUCCESS' },
     { timestamp: new Date().toISOString().substring(0, 16), action: 'MFA Enabled', details: 'Enforced Google Authenticator synchronizer for superfidelis operators.', operator: 'fidelisemus@gmail.com', status: 'SUCCESS' },
     { timestamp: new Date().toISOString().substring(0, 16), action: 'IP Whitelisted', details: 'Added 198.162.24.11 (HQ Node Cluster) to Firewall Whitelist.', operator: 'SYSTEM', status: 'SUCCESS' },
   ]);
@@ -1136,43 +1134,7 @@ export default function App() {
 
   // --- PORTAL B: SYSTEMS ADMIN GATEWAY HELPER COMPONENTS ---
   const renderSimulationBar = () => {
-    return (
-      <div className="bg-slate-900 border-b border-slate-950 px-4 py-2 flex.wrap items-center justify-between text-xs gap-3 flex">
-        <div className="flex items-center gap-2">
-          <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></div>
-          <span className="font-mono text-slate-400">DNS Proxy Simulator:</span>
-          <select
-            value={selectedDomain}
-            onChange={(e) => {
-              setSelectedDomain(e.target.value as any);
-              navigateTo('/');
-            }}
-            className="bg-slate-950 border border-slate-800 text-[11px] font-mono text-emerald-400 font-bold px-2 py-0.5 rounded cursor-pointer outline-none focus:border-emerald-500"
-          >
-            <option value="app.credguard.com">app.credguard.com (Client Portal)</option>
-            <option value="admin.credguard.com">admin.credguard.com (Systems Admin Gateway)</option>
-          </select>
-        </div>
-
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-slate-400 text-[11px]">Simulated Connection IP:</span>
-            <input
-              type="text"
-              value={simulatedIp}
-              onChange={(e) => setSimulatedIp(e.target.value)}
-              className="w-28 bg-slate-950 border border-slate-800 text-[11px] font-mono text-indigo-400 px-1.5 py-0.5 rounded text-center outline-none focus:border-indigo-500"
-              placeholder="e.g. 192.168.1.1"
-            />
-            {simulatedIp === '198.162.24.11' ? (
-              <span className="text-[9px] bg-emerald-950 border border-emerald-900/55 text-emerald-400 px-1.5 py-0.5 rounded uppercase font-bold tracking-wider font-mono">Whitelisted</span>
-            ) : (
-              <span className="text-[9px] bg-rose-950 border border-rose-900/55 text-rose-450 px-1.5 py-0.5 rounded uppercase font-bold tracking-wider font-mono">Blocked</span>
-            )}
-          </div>
-        </div>
-      </div>
-    );
+    return null;
   };
 
   const renderInjectedDatabaseComponents = () => {
@@ -1426,16 +1388,24 @@ export default function App() {
               <div className="space-y-2">
                 <h1 className="text-base font-black tracking-tight text-slate-900 dark:text-white uppercase font-sans">FIREWALL EXCEPTION DETAILS</h1>
                 <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-sans">
-                  The admin portal at <span className="font-bold text-slate-950 dark:text-white">admin.credguard.com</span> actively restricts operations to whitelisted infrastructure IP nodes.
+                  The standalone Admin Portal actively restricts operations to whitelisted infrastructure IP nodes.
                 </p>
                 <div className="p-4 bg-slate-50 dark:bg-slate-950 rounded-xl border border-rose-200 dark:border-rose-850 text-[11px] font-mono text-left space-y-2">
                   <div className="flex justify-between border-b border-slate-150 dark:border-slate-800 pb-1.5 text-[9px] uppercase font-bold text-slate-450">
                     <span>Firewall Directive</span>
                     <span className="text-rose-500 font-extrabold font-bold">BLOCKED</span>
                   </div>
-                  <p className="text-slate-600 dark:text-slate-400"><span className="text-rose-500 font-bold">Unrecognized Source IP:</span> <span className="font-black text-slate-900 dark:text-white">{simulatedIp}</span></p>
+                  <div className="flex items-center justify-between text-slate-600 dark:text-slate-400 font-mono text-xs">
+                    <span className="text-rose-500 font-bold">Simulated IP:</span>
+                    <input
+                      type="text"
+                      value={simulatedIp}
+                      onChange={(e) => setSimulatedIp(e.target.value)}
+                      className="ml-2 w-32 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 text-[11px] font-mono text-indigo-600 dark:text-indigo-400 px-1.5 py-1 rounded text-center outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
                   <p className="text-slate-600 dark:text-slate-400"><span className="text-emerald-500 font-bold">Allowed Whitelist IP:</span> 198.162.24.11</p>
-                  <p className="text-indigo-650 dark:text-indigo-400 leading-relaxed"><span className="font-bold">Bypass:</span> Modify simulated IP above to <span className="underline font-extrabold">198.162.24.11</span> using the simulated connection proxy banner.</p>
+                  <p className="text-indigo-650 dark:text-indigo-400 leading-relaxed"><span className="font-bold">Bypass:</span> Modify your simulated IP to <span className="underline font-extrabold">198.162.24.11</span> to authorize.</p>
                 </div>
               </div>
             </div>
@@ -1486,7 +1456,7 @@ export default function App() {
                     <input
                       type="email"
                       required
-                      placeholder="super@credguard.com"
+                      placeholder="fidelisemus@gmail.com"
                       className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-transparent text-xs font-semibold text-slate-900 dark:text-white"
                       value={adminCredentialEmail}
                       onChange={e => setAdminCredentialEmail(e.target.value)}
@@ -1795,7 +1765,7 @@ export default function App() {
                             className="flex-1 bg-rose-605 hover:bg-rose-700 text-white font-extrabold py-2.5 px-3 rounded-lg text-xs transition-colors cursor-pointer text-center flex items-center justify-center gap-1 shadow"
                           >
                             <CheckCircle2 className="h-3.5 w-3.5" />
-                            <span>Instant-Apply to app.credguard.com</span>
+                            <span>Instant-Apply to Client Portal</span>
                           </button>
                           <button
                             type="button"
@@ -1806,12 +1776,11 @@ export default function App() {
                               setTimeout(() => {
                                 handleApplyLicense();
                               }, 30);
-                              setSelectedDomain('app.credguard.com');
                               navigateTo('/');
                             }}
                             className="bg-indigo-600 hover:bg-indigo-705 text-white font-extrabold py-2.5 px-3 rounded-lg text-xs transition-colors cursor-pointer text-center flex items-center justify-center gap-1 shadow"
                           >
-                            <span>Go to Portal &rarr;</span>
+                            <span>Go to Workspace &rarr;</span>
                           </button>
                         </div>
                       </div>
@@ -2408,41 +2377,48 @@ export default function App() {
     );
   };
 
-  if (selectedDomain === 'admin.credguard.com') {
+  if (VITE_APP_MODE === 'admin') {
     return renderSystemsAdminPortal();
   }
 
-  if (currentPath === '/admin' && selectedDomain === 'app.credguard.com') {
-    return (
-      <div className={`min-h-screen ${theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans antialiased flex items-center justify-center p-4 transition-colors duration-200`}>
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-8 text-center space-y-6">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-450 shadow-inner">
-            <Lock className="h-6 w-6" />
-          </div>
-          <div className="space-y-2">
-            <h1 className="text-xl font-black tracking-tight text-slate-905 dark:text-white uppercase font-sans">ACCESS REJECTED: ISOLATED PORTAL</h1>
-            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-sans">
-              To enforce strict enterprise separation, this client workspace (<span className="font-bold">app.credguard.com</span>) contains no administrative endpoints or prefilled credentials.
-            </p>
-          </div>
+  if (currentPath === '/admin') {
+    if (VITE_APP_MODE === 'app') {
+      return (
+        <div className={`min-h-screen ${theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans antialiased flex items-center justify-center p-4 transition-colors duration-200`}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-8 text-center space-y-6">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-450 shadow-inner">
+              <Lock className="h-6 w-6" />
+            </div>
+            <div className="space-y-2">
+              <h1 className="text-xl font-black tracking-tight text-slate-905 dark:text-white uppercase font-sans">ACCESS REJECTED: ISOLATED PORTAL</h1>
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-sans">
+                To enforce strict enterprise separation, this client workspace contains no administrative endpoints or prefilled credentials.
+              </p>
+            </div>
 
-          <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200/55 dark:border-slate-800 text-[11px] font-mono text-left">
-            💡 <span className="font-extrabold uppercase text-indigo-650 tracking-wide block">How to access admin portal:</span>
-            Switch the host environment above inside the simulated green proxy band to <span className="underline font-bold text-slate-900 dark:text-indigo-400">admin.credguard.com</span> to connect securely.
-          </div>
+            {VITE_ADMIN_PORTAL_URL && (
+              <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-250 dark:border-slate-800 text-[11px] font-mono text-left">
+                💡 <span className="font-extrabold uppercase text-indigo-650 tracking-wide block mb-1">Standalone Admin URL:</span>
+                <a href={VITE_ADMIN_PORTAL_URL} target="_blank" rel="noreferrer" className="text-indigo-600 dark:text-indigo-400 underline font-bold truncate block">
+                  {VITE_ADMIN_PORTAL_URL}
+                </a>
+              </div>
+            )}
 
-          <button
-            onClick={() => navigateTo('/')}
-            className="w-full text-center text-xs text-indigo-600 hover:underline transition-colors mt-2 font-bold cursor-pointer"
-          >
-            Back to Client Workspace
-          </button>
+            <button
+              onClick={() => navigateTo('/')}
+              className="w-full text-center text-xs text-indigo-600 hover:underline transition-colors mt-2 font-bold cursor-pointer underline"
+            >
+              Back to Client Workspace
+            </button>
+          </div>
         </div>
-      </div>
-    );
+      );
+    }
+    return renderSystemsAdminPortal();
   }
 
-  if (currentPath === '/admin' && !isAdminVerified && currentUser?.role !== 'Operator') {
+  if (false && currentPath === '/admin' && !isAdminVerified && currentUser?.role !== 'Operator') {
     return (
       <div className={`min-h-screen ${theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans antialiased flex items-center justify-center p-4 transition-colors duration-200 relative`}>
         {/* Real-time Theme Toggle Switcher */}
@@ -2519,7 +2495,7 @@ export default function App() {
     );
   }
 
-  if (currentPath === '/admin') {
+  if (false && currentPath === '/admin') {
     return (
       <div className={`min-h-screen ${theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans antialiased transition-colors duration-200`}>
         {/* Navigation / Header */}
@@ -2888,7 +2864,7 @@ export default function App() {
                       className="inline-flex items-center space-x-2 text-xs font-black text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer font-sans"
                     >
                       <Shield className="h-4 w-4" />
-                      <span>Go to Dedicated License Administration &rarr;</span>
+                      <span>Go to Standalone Admin Portal &rarr;</span>
                     </a>
                   ) : (
                     <div className="p-3 bg-slate-50 dark:bg-slate-950/40 rounded-xl border border-slate-100 dark:border-slate-800/80 text-left font-sans text-[10px] text-slate-500 space-y-1">
@@ -2897,56 +2873,16 @@ export default function App() {
                     </div>
                   )
                 ) : (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowAdminGate(!showAdminGate);
-                        setAdminGateError('');
-                        setAdminGatePassword('');
-                      }}
-                      className="inline-flex items-center space-x-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-indigo-650 dark:hover:text-indigo-400 transition-colors cursor-pointer"
-                    >
-                      <Lock className="h-3.5 w-3.5" />
-                      <span>{showAdminGate ? "Hide Admin Gateway" : "Systems Admin Gateway"}</span>
-                    </button>
-
-                    {showAdminGate && (
-                      <div className="bg-slate-50 dark:bg-slate-950/50 p-4 rounded-xl border border-slate-200/50 dark:border-slate-800/80 space-y-3 text-left animate-fadeIn">
-                        <span className="text-[10px] font-black uppercase text-indigo-600 dark:text-indigo-400 tracking-wider block font-mono">Restricted Administration Access</span>
-                        <div className="space-y-2">
-                          <input
-                            type="password"
-                            placeholder="Enter Authority Password"
-                            className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 text-xs text-center focus:ring-1 focus:ring-indigo-650 focus:border-indigo-650 text-slate-900 dark:text-white font-semibold"
-                            value={adminGatePassword}
-                            onChange={e => {
-                              setAdminGatePassword(e.target.value);
-                              setAdminGateError('');
-                            }}
-                          />
-                          {adminGateError && (
-                            <p className="text-[10px] font-bold text-rose-600 dark:text-rose-450 text-center">❌ {adminGateError}</p>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (adminGatePassword === 'admin123') {
-                                setIsAdminVerified(true);
-                                setAdminGateError('');
-                                navigateTo('/admin');
-                              } else {
-                                setAdminGateError('Invalid Authority Password');
-                              }
-                            }}
-                            className="w-full bg-slate-900 hover:bg-black dark:bg-indigo-600 dark:hover:bg-indigo-700 text-white font-bold py-2 px-3 rounded-lg text-xs transition-colors cursor-pointer text-center"
-                          >
-                            Authenticate Admin Console
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigateTo('/admin');
+                    }}
+                    className="inline-flex items-center space-x-2 text-xs font-black text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer font-sans border-none bg-transparent"
+                  >
+                    <Shield className="h-4 w-4" />
+                    <span>Open Standalone Admin Portal &rarr;</span>
+                  </button>
                 )}
               </div>
             )}
